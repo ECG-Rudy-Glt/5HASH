@@ -1,0 +1,91 @@
+Taylor Shift's Ticket Shop
+
+Contexte du projet :
+Projet de groupe de 3.
+
+L'équipe technique de Taylor Shift a développé une application e-commerce pour la vente de billets de concert. Votre agence est responsable du déploiement et de la configuration de l'infrastructure nécessaire pour l'héberger et gérer l'augmentation du trafic au moment de l'ouverture des ventes.
+
+Le défi :
+Déployer une infrastructure scalable et fiable pour l'application existante. L'application est déjà développée, votre responsabilité se limite au déploiement de l'infrastructure, à la configuration des serveurs et à la documentation.
+
+Objectifs clés :
+Déploiement de l'infrastructure : Provisionner l'infrastructure avec Terraform.
+Gestion de la configuration : Configurer les serveurs et déployer l'application avec Ansible.
+Gestion du trafic : Concevoir la solution pour qu'elle reste disponible et réactive en cas d'augmentation du trafic.
+Documentation : Fournir un README concis permettant à l'équipe technique de comprendre, exploiter et maintenir la solution.
+
+Instructions :
+Déploiement de l'infrastructure :
+Déployer l'application en utilisant l'image générique PrestaShop disponible sur Docker Hub et la connecter à une base de données ou un data store adapté.
+
+Votre solution doit contenir au moins une instance EC2 provisionnée avec Terraform et configurée avec Ansible. Elle doit également contenir d'autres ressources AWS pertinentes.
+
+Vous êtes libres de décider quels composants s'exécutent sur EC2 et lesquels utilisent des services AWS managés. Par exemple, l'application peut s'exécuter sur EC2 avec une base de données managée, ou la base de données peut s'exécuter sur EC2 pendant que d'autres composants utilisent des services AWS. L'architecture finale doit fonctionner, supporter le scaling, et être expliquée dans la documentation.
+
+Gestion du trafic :
+Expliquer comment les requêtes atteignent l'application et comment l'architecture proposée gère l'augmentation du trafic. Vous êtes libres de choisir les services AWS et la stratégie de scaling pertinents. Indiquez les limites de votre approche et décrivez ce qui se passe si une instance de l'application devient indisponible, dans votre README.md et votre présentation.
+
+Gestion de la configuration :
+Utiliser Ansible pour configurer l'infrastructure provisionnée par Terraform.
+
+Votre solution doit utiliser un inventaire dynamique avec `cloud.terraform.terraform_provider`, des rôles réutilisables, Ansible Galaxy, Ansible Vault, des templates et des handlers. Les playbooks doivent être idempotents et ne doivent contenir aucun secret en clair, clé privée, ou adresse d'hôte copiée manuellement.
+
+Livrables :
+Code d'infrastructure : Le code Terraform utilisé pour provisionner l'infrastructure.
+Code de configuration : Le code Ansible utilisé pour configurer les serveurs et déployer l'application.
+Documentation : Un README concis expliquant comment déployer, exploiter et maintenir la solution.
+Présentation : Une présentation brève couvrant les choix d'infrastructure, la gestion de configuration, et les points clés à retenir.
+
+Test du projet :
+Le projet sera testé à l'aide des commandes ci-dessous. Vous devez documenter comment configurer le backend Terraform avant l'exécution de ces commandes.
+
+
+```sh
+terraform -chdir=terraform init
+terraform -chdir=terraform apply
+ansible-galaxy install -r ansible/requirements.yml
+ansible-inventory -i ansible/inventory.yml --graph
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+```
+
+La deuxième exécution du playbook ne doit signaler aucun changement inattendu. L'évaluateur accédera ensuite à l'endpoint documenté de l'application et vérifiera sa connexion à la base de données ou au data store.
+
+
+Évaluation (30 pts)
+Solution fonctionnelle (10 pts) :
+
+L'application e-commerce est déployée et accessible (3 pts)
+L'application est connectée à une base de données ou un data store fonctionnel (3 pts)
+Au moins une instance EC2 est provisionnée avec Terraform et configurée avec Ansible (2 pts)
+La solution complète peut être redéployée à partir de l'automatisation soumise (2 pts)
+
+Terraform et infrastructure AWS (7 pts) :
+
+Les ressources AWS pertinentes forment une architecture cohérente avec une stratégie de gestion du trafic justifiée (2 pts)
+Organisation du code, modules, variables, descriptions de variables, et outputs (2 pts)
+Séparation des environnements (prod, staging, dev) (1 pt)
+État distant, verrouillage, data sources, et références entre ressources (1 pt)
+Réseau sécurisé et gestion des secrets (1 pt)
+
+Intégration Ansible (6 pts) :
+
+Inventaire dynamique généré à partir de Terraform (2 pts)
+Rôles réutilisables et Ansible Galaxy (1 pt)
+Ansible Vault et gestion sécurisée des secrets (1 pt)
+Playbooks idempotents utilisant templates et handlers (2 pts)
+
+README pour les développeurs (4 pts) :
+
+Clarté et instructions reproductibles (2 pts)
+Concision (1 pt)
+Choix de conception de la solution, y compris le placement des composants (1 pt)
+
+Présentation (3 pts) :
+
+Explication claire de la solution (1 pt)
+Démonstration fonctionnelle (1 pt)
+Capacité à justifier les choix techniques (1 pt)
+
+Échéance :
+Soumettre le projet avant la date limite communiquée par le formateur.
