@@ -1,0 +1,108 @@
+# Terraform — Taylor Shift's Ticket Shop
+
+Documentation du code Terraform : architecture provisionnée, comment le lancer, et comment l'utiliser sur plusieurs environnements (dev / staging / prod).
+
+Pour le schéma détaillé et l'état d'avancement (ce qui est fait / pas encore fait), voir [docs/architecture-current.md](../docs/architecture-current.md). Pour le plan multi-région à venir, voir [docs/architecture-multi-region.md](../docs/architecture-multi-region.md).
+
+## 1. Architecture provisionnée
+
+```
+terraform/
+  provider.tf     # provider aws pointé sur Floci (localhost.floci.io:4566)
+  versions.tf      # contraintes de version (aws ~>6.0, random ~>3.6)
+  variables.tf      # variables du root module
+  locals.tf         # local.name = "<project_name>-<environment>", tags communs
+  main.tf           # câblage des modules
+  outputs.tf
+  envs/
+    dev.tfvars
+    staging.tfvars
+    prod.tfvars
+  modules/
+    network/    # VPC, subnets publics/privés (2 AZ), IGW, NAT Gateway, routage
+    security/   # security groups (alb, app, database)
+    compute/    # ALB + target group + listener, launch template, ASG, scaling policy CPU
+    database/   # RDS MySQL + mot de passe généré + secret Secrets Manager
+```
+
+Chaque module est indépendant et ne connaît que ses `variables.tf` / `outputs.tf` — c'est `main.tf` à la racine qui les relie (`module.network.vpc_id` → `module.security`, etc.). Toutes les ressources sont nommées via `local.name` (`<project_name>-<environment>`, ex. `ticket-shop-dev`) pour cohabiter sans collision entre environnements dans le même backend.
+
+**Chemin du trafic** : Internet → ALB (subnets publics, SG `alb`) → target group (health check `/`) → instances EC2 de l'ASG (subnets privés, SG `app`, exécuteront PrestaShop en Docker une fois configurées par Ansible) → RDS MySQL (subnet privé, SG `database`). Le mot de passe RDS est généré par Terraform (`random_password`) et publié dans un secret Secrets Manager unique (`<name>/rds/master`) qu'Ansible ira lire au déploiement — jamais dupliqué en clair.
+
+## 2. Prérequis
+
+- Terraform >= 1.5
+- Docker + Docker Compose (pour Floci)
+- Floci démarré **depuis la racine du dépôt** :
+  ```sh
+  docker compose up -d
+  ```
+- Une paire de clés SSH pour Ansible (la clé **publique** est passée à Terraform, jamais la privée) :
+  ```sh
+  ssh-keygen -t ed25519 -f ~/.ssh/ticket_shop_ansible -N ""
+  ```
+
+## 3. Lancer le projet (environnement par défaut : dev)
+
+```sh
+cd terraform
+terraform init
+
+terraform apply \
+  -var-file=envs/dev.tfvars \
+  -var "ssh_public_key=$(cat ~/.ssh/ticket_shop_ansible.pub)"
+```
+
+> La séquence de test officielle du projet (`terraform -chdir=terraform init && terraform -chdir=terraform apply`, sans `-var-file`) applique les valeurs par défaut du root module, équivalentes à l'environnement `dev`.
+
+Outputs utiles après apply :
+
+```sh
+terraform output alb_dns_name     # endpoint HTTP de l'application
+terraform output db_secret_arn    # ARN du secret RDS (lu par Ansible)
+```
+
+## 4. Utiliser plusieurs environnements (dev / staging / prod)
+
+La séparation d'environnement combine deux mécanismes :
+
+1. **Un fichier de variables par environnement** (`envs/dev.tfvars`, `envs/staging.tfvars`, `envs/prod.tfvars`) — capacité de l'ASG, taille d'instance, RDS Multi-AZ.
+2. **Un workspace Terraform par environnement** — isole le state (donc les ressources) de chaque environnement dans le même backend, sans dupliquer le code.
+
+```sh
+# Première utilisation d'un environnement : créer son workspace
+terraform workspace new staging
+terraform workspace new prod
+
+# Basculer sur un environnement et le déployer
+terraform workspace select staging
+terraform apply -var-file=envs/staging.tfvars -var "ssh_public_key=$(cat ~/.ssh/ticket_shop_ansible.pub)"
+
+terraform workspace select prod
+terraform apply -var-file=envs/prod.tfvars -var "ssh_public_key=$(cat ~/.ssh/ticket_shop_ansible.pub)"
+
+# Revenir sur dev
+terraform workspace select default
+```
+
+| Environnement | Fichier | Instance | ASG (min/max/desired) | RDS Multi-AZ |
+|---|---|---|---|---|
+| dev | `envs/dev.tfvars` | t3.micro | 1 / 2 / 1 | non |
+| staging | `envs/staging.tfvars` | t3.micro | 2 / 3 / 2 | non |
+| prod | `envs/prod.tfvars` | t3.small | 2 / 6 / 2 | oui |
+
+Chaque workspace a son propre state (`terraform.tfstate.d/<workspace>/` en local, ou préfixé par workspace dans un backend S3 distant), donc `terraform destroy` sur `staging` n'affecte jamais `prod` ou `dev`. Toutes les ressources sont en plus nommées et taguées `Environment = <env>` (voir `local.common_tags` dans `locals.tf`) pour les repérer facilement dans la console/CLI.
+
+## 5. Nettoyage
+
+```sh
+terraform workspace select <env>
+terraform destroy -var-file=envs/<env>.tfvars -var "ssh_public_key=..."
+```
+
+## 6. Limitations connues (dues à Floci, pas au code)
+
+- **Security groups non appliqués** : Floci accepte et restitue les SG (control-plane) mais ne filtre pas réellement le trafic — voir commentaire dans [`modules/security/main.tf`](modules/security/main.tf) et [floci-io/floci#2564](https://github.com/floci-io/floci/issues/2564). Le code reste correct et portable vers un vrai compte AWS.
+- **`aws_autoscaling_policy`** : Floci ne persiste pas l'attribut `enabled` des scaling policies (bascule `false → true` à chaque apply). Comportement normal sur AWS réel — non corrigé côté code pour ne pas masquer une vraie dérive avec `ignore_changes`.
+- **Backend local pour l'instant** : le state est stocké en local (pas encore de backend S3 + verrouillage DynamoDB — prévu, voir README racine §7).
+- **Floci est un service partagé** sur la machine du poste de dev (un seul conteneur pour tous les projets du cours) : `terraform destroy` ne touche que les ressources de ce state, mais penser à filtrer par tag `Project`/`Environment` avant toute commande AWS CLI manuelle pour ne pas impacter d'autres projets.
