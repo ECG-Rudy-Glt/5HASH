@@ -133,17 +133,26 @@ provider "aws" {
 
 ## 7. Bootstrap du backend Terraform (à faire une seule fois)
 
-Le backend S3 + DynamoDB (verrouillage) doit exister dans Floci avant `terraform init`. Étapes prévues, via AWS CLI pointé sur Floci (`--endpoint-url=http://localhost.floci.io:4566`) :
+Le bucket S3 utilisé comme backend doit exister avant `terraform init`. Le verrouillage est géré nativement par le backend `s3` (`use_lockfile = true`, Terraform ≥ 1.10) — pas besoin de table DynamoDB séparée.
 
 ```sh
-aws --endpoint-url=http://localhost.floci.io:4566 s3api create-bucket --bucket tfstate-5hash
-aws --endpoint-url=http://localhost.floci.io:4566 dynamodb create-table --table-name tf-lock-5hash \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+
+aws --endpoint-url=http://localhost.floci.io:4566 --region us-east-1 \
+  s3api create-bucket --bucket ticket-shop-tfstate
+
+aws --endpoint-url=http://localhost.floci.io:4566 --region us-east-1 \
+  s3api put-bucket-versioning --bucket ticket-shop-tfstate --versioning-configuration Status=Enabled
 ```
 
-(Détails exacts — noms de ressources — à préciser une fois le module `envs/<env>/backend.tf` écrit.)
+Le backend est déclaré dans [`terraform/backend.tf`](terraform/backend.tf) (bucket `ticket-shop-tfstate`, clé `ticket-shop/terraform.tfstate`, endpoint Floci). Une fois le bucket créé, `terraform init` suffit :
+
+```sh
+terraform -chdir=terraform init
+```
+
+> Actuellement le backend pointe vers le bucket S3 émulé par Floci (donc encore local à la machine de dev, pas accessible en dehors) — voir la discussion "CI/CD" plus bas pour la suite (bucket réel type Scaleway Object Storage si le state doit être partagé/CI).
 
 ## 8. Déploiement
 

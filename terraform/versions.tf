@@ -10,5 +10,9 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    ansible = {
+      source  = "ansible/ansible"
+      version = ">= 1.0"
+    }
   }
 }

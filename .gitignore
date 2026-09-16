@@ -3,3 +3,10 @@ floci-data/
 **/*.tfstate
 **/*.tfstate.*
 *.retry
+.keys/
+.vault-pass
+ansible/collections/
+# Rôle installé depuis Ansible Galaxy (voir requirements.yml) — se
+# réinstalle avec `ansible-galaxy role install -r ansible/requirements.yml`.
+# Nos propres rôles (ansible/roles/prestashop/) restent versionnés.
+ansible/roles/geerlingguy.docker/

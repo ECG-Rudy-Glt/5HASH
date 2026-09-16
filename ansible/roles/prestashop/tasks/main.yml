@@ -1,0 +1,38 @@
+---
+# Le rôle prestashop : déploie le conteneur PrestaShop (image générique
+# Docker Hub) connecté à la base RDS provisionnée par Terraform.
+#
+# Le mot de passe RDS n'est jamais recopié à la main ni stocké dans Ansible
+# Vault : il est lu à la volée dans Secrets Manager, à partir du seul ARN que
+# Terraform a transmis (db_secret_arn, voir terraform/ansible.tf).
+
+- name: Créer le répertoire de l'application
+  ansible.builtin.file:
+    path: "{{ prestashop_app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# Le lookup s'exécute sur le contrôleur (ce poste), pas sur l'instance
+# distante — c'est ce poste qui a accès à Floci / Secrets Manager.
+# no_log : la valeur déchiffrée ne doit apparaître ni dans les logs, ni dans
+# le --diff, une fois sortie du secret.
+- name: Lire les identifiants RDS dans Secrets Manager
+  ansible.builtin.set_fact:
+    prestashop_db_creds: "{{ lookup('amazon.aws.secretsmanager_secret', db_secret_arn,
+                              region=prestashop_db_secret_region,
+                              access_key=prestashop_floci_access_key,
+                              secret_key=prestashop_floci_secret_key,
+                              endpoint_url=prestashop_floci_endpoint) | from_json }}"
+  no_log: true
+
+- name: Déposer le docker-compose de PrestaShop
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ prestashop_app_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  no_log: true
+  notify: Redéployer PrestaShop

@@ -1,0 +1,23 @@
+---
+# Dépendances épinglées : un dépôt cloné ailleurs doit produire le même
+# résultat. Installation :
+#   ansible-galaxy collection install -r requirements.yml -p collections
+#   ansible-galaxy role install -r requirements.yml --roles-path roles
+
+collections:
+  # Le greffon d'inventaire dynamique qui lit le state Terraform.
+  - name: cloud.terraform
+    version: "4.0.0"
+  # Le lookup amazon.aws.aws_secret, qui lit le secret RDS dans Secrets
+  # Manager sans jamais le dupliquer dans Ansible Vault.
+  - name: amazon.aws
+    version: "10.1.2"
+  # community.docker.docker_compose_v2 pour déployer PrestaShop.
+  - name: community.docker
+    version: "4.8.5"
+
+roles:
+  # Rôle de la communauté pour l'installation de Docker : on ne réécrit pas
+  # ce qui existe déjà et qui est éprouvé.
+  - name: geerlingguy.docker
+    version: "8.0.0"

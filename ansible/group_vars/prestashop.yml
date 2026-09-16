@@ -1,0 +1,16 @@
+---
+# Comment Ansible joint les instances PrestaShop sur Floci.
+#
+# Chaque instance EC2 est en réalité un conteneur Docker. Son adresse privée
+# n'est joignable que depuis un poste Linux ; Floci publie en revanche son
+# port SSH sur ce poste, à un numéro qu'il choisit. On le lui demande à
+# chaque connexion, à partir de l'identifiant que Terraform a transmis
+# (floci_instance, voir terraform/ansible.tf).
+#
+# Sur un vrai AWS, ce fichier n'existerait pas : ansible_host serait
+# l'adresse privée de l'instance, transmise directement par Terraform.
+
+ansible_host: 127.0.0.1
+ansible_port: >-
+  {{ lookup('ansible.builtin.pipe', 'docker port floci-ec2-' ~ floci_instance ~ ' 22/tcp')
+     | regex_search('[0-9]+$') }}

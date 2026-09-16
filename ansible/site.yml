@@ -1,0 +1,38 @@
+---
+# Playbook principal — Taylor Shift's Ticket Shop.
+#
+# Aucun hôte n'est nommé : le groupe "prestashop" vient de l'inventaire
+# dynamique (ansible/inventory.yml), donc du state Terraform.
+
+- name: Configurer les instances PrestaShop
+  hosts: prestashop
+  gather_facts: true
+  become: true
+
+  vars:
+    docker_install_compose_plugin: true
+    # Les instances Floci sont elles-mêmes des conteneurs Docker : overlay2
+    # imbriqué dans overlay2 échoue sur certaines images (whiteout files mal
+    # gérés — erreur reproductible avec l'image PrestaShop).
+    # fuse-overlayfs (solution standard pour Docker-in-Docker, plus rapide
+    # que vfs) a été testé mais ne démarre pas ici : dockerd reste bloqué
+    # au montage FUSE, probablement une capacité SYS_ADMIN/mount refusée
+    # par le conteneur "instance" de Floci. vfs (copies complètes, plus
+    # lent mais fiable) reste donc la seule option qui fonctionne dans cet
+    # environnement imbriqué. Sur un vrai EC2 (pas de nesting), overlay2
+    # (le défaut) serait le bon choix — aucun des deux ne serait nécessaire.
+    docker_daemon_options:
+      storage-driver: vfs
+
+  pre_tasks:
+    # L'image Debian minimale de Floci n'a pas Python : aucun module Ansible
+    # "normal" ne peut s'exécuter avant. `raw` est le seul module qui n'en a
+    # pas besoin. Idempotent : ne réinstalle rien si python3 est déjà là.
+    - name: Amorcer Python3 si absent
+      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+      changed_when: false
+
+  roles:
+    # Installé depuis Ansible Galaxy : on ne réécrit pas ce qui existe déjà.
+    - geerlingguy.docker
+    - prestashop

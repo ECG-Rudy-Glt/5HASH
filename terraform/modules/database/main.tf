@@ -39,6 +39,12 @@ resource "aws_db_instance" "this" {
 resource "aws_secretsmanager_secret" "db" {
   name = "${var.name}/rds/master"
 
+  # Sans ceci, `terraform destroy` marque le secret pour suppression à J+7 au
+  # lieu de le supprimer immédiatement : un redeploy le lendemain échoue sur
+  # "marked for deletion". En production, on garderait au contraire cette
+  # fenêtre de récupération (ex. 7-30 jours).
+  recovery_window_in_days = 0
+
   tags = {
     Name = "${var.name}-db-secret"
   }

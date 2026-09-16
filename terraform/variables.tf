@@ -49,9 +49,9 @@ variable "private_subnet_cidrs" {
 }
 
 variable "ami_id" {
-  description = "AMI de base pour les instances EC2 applicatives"
+  description = "AMI de base pour les instances EC2 applicatives. Un id inconnu de Floci retombe sur Amazon Linux 2023 sans bootstrap sshd (connexion SSH impossible) : on utilise un nom reconnu du catalogue Floci."
   type        = string
-  default     = "ami-12345678"
+  default     = "ami-debian12"
 }
 
 variable "instance_type" {
