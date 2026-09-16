@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "Région AWS (émulée par Floci)"
+  description = "Région AWS "
   type        = string
   default     = "us-east-1"
 }
@@ -8,6 +8,23 @@ variable "project_name" {
   description = "Préfixe de nommage des ressources"
   type        = string
   default     = "ticket-shop"
+}
+
+variable "environment" {
+  description = "Environnement déployé (dev, staging, prod) — isole le nommage, la capacité et l'état (via workspace Terraform)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "environment doit être dev, staging ou prod."
+  }
+}
+
+variable "multi_az" {
+  description = "RDS Multi-AZ (haute disponibilité) — activé en staging/prod"
+  type        = bool
+  default     = false
 }
 
 variable "azs" {

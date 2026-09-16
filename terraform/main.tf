@@ -1,7 +1,7 @@
 module "network" {
   source = "./modules/network"
 
-  name                  = var.project_name
+  name                  = local.name
   vpc_cidr              = var.vpc_cidr
   azs                   = var.azs
   public_subnet_cidrs   = var.public_subnet_cidrs
@@ -11,14 +11,14 @@ module "network" {
 module "security" {
   source = "./modules/security"
 
-  name   = var.project_name
+  name   = local.name
   vpc_id = module.network.vpc_id
 }
 
 module "compute" {
   source = "./modules/compute"
 
-  name                = var.project_name
+  name                = local.name
   vpc_id              = module.network.vpc_id
   public_subnet_ids   = module.network.public_subnet_ids
   private_subnet_ids  = module.network.private_subnet_ids
@@ -36,10 +36,11 @@ module "compute" {
 module "database" {
   source = "./modules/database"
 
-  name                = var.project_name
+  name                = local.name
   private_subnet_ids  = module.network.private_subnet_ids
   database_sg_id      = module.security.database_sg_id
 
   db_name     = var.db_name
   db_username = var.db_username
+  multi_az    = var.multi_az
 }
