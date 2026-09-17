@@ -4,12 +4,20 @@ services:
   prestashop:
     image: {{ prestashop_image }}
     restart: unless-stopped
+    # a2enmod headers : requis par force-host.conf (voir ce fichier) pour
+    # contourner l'ALB Floci qui ne transmet pas le header Host d'origine.
+    # Pas d'image custom : on réactive juste un module Apache déjà présent
+    # dans l'image générique avant de lancer le script d'entrée d'origine.
+    command: sh -c "a2enmod headers && exec /tmp/docker_run.sh"
     ports:
       # Lié à l'IP précise de l'instance, pas 0.0.0.0 : sur Floci, une
       # écoute large entre en conflit avec le socat de métadonnées interne
       # (169.254.169.254:80). C'est aussi l'IP que l'ALB utilise pour
       # joindre l'instance, donc rien ne change côté routage.
       - "{{ private_ip }}:{{ prestashop_http_port }}:80"
+    volumes:
+      - prestashop_data:/var/www/html
+      - ./force-host.conf:/etc/apache2/conf-enabled/force-host.conf:ro
     environment:
       DB_SERVER: "{{ prestashop_db_creds.host }}"
       DB_PORT: "{{ prestashop_db_creds.port }}"
@@ -22,8 +30,6 @@ services:
       ADMIN_PASSWD: "{{ vault_ps_admin_passwd }}"
       PS_FOLDER_ADMIN: admin
       PS_ERASE_DB: "0"
-    volumes:
-      - prestashop_data:/var/www/html
 
 volumes:
   prestashop_data:

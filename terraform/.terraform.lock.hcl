@@ -6,6 +6,7 @@ provider "registry.terraform.io/ansible/ansible" {
   constraints = ">= 1.0.0"
   hashes = [
     "h1:8RScKkD5ZCSpPJ8zTwgz56WDTV9wUnhKBrHfUrIA+SA=",
+    "h1:JEyKY2Ke5i7q1VKA5W5NIcbI3SBgVaPtOCeRmXZD4ko=",
     "zh:0332643192233c9baa751318b1e22a3eec54ab6bf5172fa97788ed9d32ed36e0",
     "zh:1242308c08544dd881cf274ca27aa5d7eb41c26f987759a29f0fda410c01d771",
     "zh:1cc36a7fe58be3cd5c39c278cf0e71e0a4005fc6317dffa23dcf2b86df8c7e15",
@@ -28,6 +29,7 @@ provider "registry.terraform.io/hashicorp/aws" {
   constraints = "~> 6.0"
   hashes = [
     "h1:2fTLxzUDmp/KVIHbIeLTB4bIzWHx8E6Dw+1ALLUi+Yw=",
+    "h1:wXARLY+IeQ7ufYxCLTPCwToWGMRvOpiOTfJS97iwUzI=",
     "zh:07172315d67bc9781240272759cdfc7bd32b7e72384a56862c2c1da3cca99a81",
     "zh:154ce7d2659de9a59ddfe96d7cab41a9ddc2cb267a7d4bcdf4e737ff2ffdec06",
     "zh:17324d4335a7a7ac01cc23eded530775606680ff53b47cb74a3cb95d1121f836",
@@ -51,6 +53,7 @@ provider "registry.terraform.io/hashicorp/random" {
   version     = "3.9.1"
   constraints = "~> 3.6"
   hashes = [
+    "h1:PlW+UZ4EElQF3NQwf41KQwavFujab3Czc51zu9dyVM8=",
     "h1:g40qr7yDmIpaur4SsK5BcOda3HSo1RJ6zHVMqN4EJ+0=",
     "zh:05f4734c1f0be840b711b3eff259ebc5fca436784c728955b1678078466f48d7",
     "zh:0b91bf19371d012434eba1deeb6aab77158def9b39601dcbd94450b3974a2a26",

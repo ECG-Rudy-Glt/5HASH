@@ -27,6 +27,15 @@
                               endpoint_url=prestashop_floci_endpoint) | from_json }}"
   no_log: true
 
+- name: Déposer la config Apache forçant le header Host (contournement ALB Floci)
+  ansible.builtin.template:
+    src: force-host.conf.j2
+    dest: "{{ prestashop_app_dir }}/force-host.conf"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Redéployer PrestaShop
+
 - name: Déposer le docker-compose de PrestaShop
   ansible.builtin.template:
     src: docker-compose.yml.j2

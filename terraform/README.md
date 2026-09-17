@@ -43,6 +43,7 @@ Chaque module est indépendant et ne connaît que ses `variables.tf` / `outputs.
   ```
 - Une paire de clés SSH pour Ansible (la clé **publique** est passée à Terraform, jamais la privée) :
   ```sh
+  mkdir -p .keys
   ssh-keygen -t ed25519 -f .keys/ticket_shop -N ""
   ```
 
@@ -113,3 +114,4 @@ terraform destroy -var-file=envs/<env>.tfvars -var "ssh_public_key=..."
 - **Floci ne persiste pas l'état complet entre redémarrages du conteneur** : recréer le conteneur Floci (`docker compose up -d` après une modification de `compose.yml`, par ex.) efface toute l'infra émulée (vérifié empiriquement — VPC, ALB, RDS, secrets, tout). Le state Terraform distant survit (c'est du S3 émulé, donc lui aussi perdu en fait) : après un redémarrage de Floci, repartir du bootstrap (§ README racine 7) puis d'un `apply` complet.
 - **`ami_id` doit être un nom reconnu du catalogue Floci** (`ami-debian12` par défaut) : un id arbitraire retombe sur Amazon Linux 2023 sans bootstrap sshd, rendant l'instance injoignable en SSH.
 - **Changer le launch template (AMI, clé SSH, type d'instance) ne remplace pas les instances existantes de l'ASG** : `terraform apply` met à jour le launch template, mais les instances déjà lancées continuent de tourner avec l'ancienne version tant qu'elles ne sont pas recréées. Forcer un rafraîchissement : `aws ... autoscaling start-instance-refresh --auto-scaling-group-name <asg_name>`.
+- **L'ALB émulé ne transmet pas le header `Host` d'origine au backend** : capture réseau à l'appui, Floci réécrit systématiquement le `Host` vu par l'instance en `<private_ip>:80` au lieu de préserver celui envoyé par le client. Sans compensation, PrestaShop (qui compare ce header à `PS_SHOP_DOMAIN`) redirige vers son domaine canonique à chaque requête — et cette redirection repasse par le même ALB cassé, d'où une boucle infinie. **Contournement appliqué côté Ansible** (pas un hack manuel) : le rôle `prestashop` dépose [`force-host.conf`](../ansible/roles/prestashop/templates/force-host.conf.j2) (`RequestHeader set Host "<alb_dns_name>"`, module `mod_headers`) monté dans le conteneur, qui force le header vu par PHP à la bonne valeur avant qu'il n'atteigne PrestaShop — voir [`ansible/roles/prestashop/tasks/main.yml`](../ansible/roles/prestashop/tasks/main.yml) et [`docker-compose.yml.j2`](../ansible/roles/prestashop/templates/docker-compose.yml.j2) (`command: sh -c "a2enmod headers && exec /tmp/docker_run.sh"`). Sans effet sur un vrai AWS (l'ALB y préserve déjà le bon `Host`, donc la valeur forcée est la même que celle déjà reçue).

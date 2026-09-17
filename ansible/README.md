@@ -77,8 +77,12 @@ ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
 ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # doit annoncer 0 changement
 ```
 
+>**Sur macOS**, préfixer les deux commandes `ansible-playbook` (et toute commande `ansible`/`ansible-inventory` qui déclenche le lookup Secrets Manager) par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` — sans ça, le worker forké par Ansible plante (`[ERROR]: A worker was found in a dead state`) dès que boto3/botocore est utilisé après le `fork()`, à cause d'une incompatibilité connue entre le modèle de fork d'Ansible et le runtime Objective-C de macOS. Voir §8.
+
 ## 8. Limites connues (environnement Floci, pas le code)
 
 - **Driver de stockage Docker forcé en `vfs`** : les instances Floci sont elles-mêmes des conteneurs Docker ; `overlay2` (le défaut) casse sur certaines images en imbriqué (erreur `whiteout file`). `fuse-overlayfs` (solution standard pour Docker-in-Docker, plus rapide) a été testée mais le montage FUSE reste bloqué dans ce conteneur — probablement une capacité refusée. `vfs` (copies complètes, plus lent mais fiable) est donc la seule option qui fonctionne ici. Sur un vrai EC2, aucun des deux ne serait nécessaire.
-- **Image Debian minimale sans Python** : bootstrap via `ansible.builtin.raw` en `pre_tasks`, seul module qui n'en a pas besoin.
+- **Image Debian minimale sans Python** : bootstrap via `ansible.builtin.raw` en `pre_tasks`, seul module qui n'en a pas besoin. Piège d'ordonnancement : la collecte de facts Ansible s'exécute par défaut *avant* les `pre_tasks`, donc avant que Python ne soit installé — [`site.yml`](site.yml) désactive `gather_facts` au niveau du play et rappelle explicitement `ansible.builtin.setup:` dans les `pre_tasks`, une fois Python bootstrapé.
 - **Pas de vrai firewall** : les security groups sont déclarées correctement (portables vers un vrai AWS) mais Floci ne les applique pas réellement — voir [`terraform/modules/security/main.tf`](../terraform/modules/security/main.tf).
+- **macOS : worker Ansible qui plante sur le lookup Secrets Manager** — voir l'avertissement `OBJC_DISABLE_INITIALIZE_FORK_SAFETY` juste au-dessus.
+- **ALB Floci qui ne transmet pas le header `Host`** : sans compensation, boucle de redirection infinie sur `alb_dns_name`. Corrigé côté rôle `prestashop` (`force-host.conf` + `mod_headers`, voir §6 du template `docker-compose.yml.j2` et [`terraform/README.md` §6](../terraform/README.md#6-limitations-connues-dues-à-floci-pas-au-code) pour le détail).

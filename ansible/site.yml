@@ -6,7 +6,11 @@
 
 - name: Configurer les instances PrestaShop
   hosts: prestashop
-  gather_facts: true
+  # La collecte de facts s'exécute avant les pre_tasks (ordre standard
+  # Ansible), donc avant le bootstrap Python ci-dessous — elle échouerait
+  # sur l'image Debian minimale sans Python. On la désactive ici et on la
+  # relance explicitement dans les pre_tasks, une fois Python présent.
+  gather_facts: false
   become: true
 
   vars:
@@ -31,6 +35,9 @@
     - name: Amorcer Python3 si absent
       ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3)
       changed_when: false
+
+    - name: Collecter les facts (Python est maintenant disponible)
+      ansible.builtin.setup:
 
   roles:
     # Installé depuis Ansible Galaxy : on ne réécrit pas ce qui existe déjà.
