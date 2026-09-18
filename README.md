@@ -4,7 +4,7 @@ Déploiement et exploitation de l'infrastructure hébergeant l'application e-com
 
 Docs détaillées : [terraform/README.md](terraform/README.md) (infra) · [ansible/README.md](ansible/README.md) (configuration) · [docs/architecture-current.md](docs/architecture-current.md) (schéma à jour) · [docs/architecture-multi-region.md](docs/architecture-multi-region.md) (plan multi-région).
 
-> ⚠️ **Cible = Floci, pas AWS réel.** L'énoncé prévoit que l'évaluateur accède à un endpoint réel — ici, ça suppose que Floci tourne sur la machine qui sert d'évaluation (voir §5). Pas d'accès public en dehors de cette machine tant qu'on ne bascule pas sur du vrai AWS.
+> **Cible = Floci, pas AWS réel.** L'énoncé prévoit que l'évaluateur accède à un endpoint réel — ici, ça suppose que Floci tourne sur la machine qui sert d'évaluation (voir §5). Pas d'accès public en dehors de cette machine tant qu'on ne bascule pas sur du vrai AWS.
 
 ## 1. Architecture
 
@@ -88,8 +88,9 @@ docs/
 ## 4. Prérequis
 
 - Docker (pour Floci et pour PrestaShop sur les instances).
-- Terraform >= 1.5, Ansible-core (testé en 2.19), AWS CLI.
-- `python3-boto3`/`python3-botocore` sur le poste de contrôle (requis par le lookup Ansible qui lit le secret RDS — pas sur les instances). Ces paquets `apt` supposent un contrôleur Debian/Ubuntu ; sur macOS, installer boto3/botocore dans l'environnement Python **utilisé par `ansible-core`** (ex. `pipx inject ansible-core boto3 botocore` si Ansible a été installé via `pipx` — vérifier avec `ansible --version` quel interpréteur Python est utilisé).
+- Terraform >= 1.5, **Ansible-core >= 2.15** (testé en 2.19 et 2.20), AWS CLI.
+  > `geerlingguy.docker` utilise `ansible.builtin.deb822_repository`, ajouté en ansible-core 2.15. Le paquet `apt` sur Debian/Ubuntu stable est souvent plus vieux (`2.14.18` sur Debian 12) : installer via `pipx install ansible-core` plutôt que `apt`.
+- `python3-boto3`/`python3-botocore` sur le poste de contrôle (lookup Ansible qui lit le secret RDS, pas sur les instances). Sur macOS, injecter dans l'environnement d'Ansible : `pipx inject ansible-core boto3 botocore`.
 - Une paire de clés SSH pour Ansible : `mkdir -p .keys && ssh-keygen -t ed25519 -f .keys/ticket_shop -N ""` (`.keys/` est gitignored — `ssh-keygen` ne crée pas le dossier parent tout seul, d'où le `mkdir -p`).
 - Pas de compte AWS réel requis : toute l'infra est émulée localement par **Floci**.
 
@@ -101,9 +102,7 @@ docker compose up -d
 
 Floci écoute sur `http://localhost.floci.io:4566` (identifiants factices `test`/`test` — Floci ne les vérifie jamais, rien à protéger). Ce compose publie aussi le port `80` (écoute HTTP de l'ALB) sur l'hôte.
 
-> Ce mapping de port `80` n'existait pas dans une version antérieure de `compose.yml` — sans lui, `docker ps` ne montre que `4566:4566` et l'ALB est totalement injoignable depuis un navigateur. Vérifier `docker ps` après un `docker compose up -d` si l'endpoint applicatif (§8) ne répond pas.
-
-> Floci ne persiste pas l'état complet des ressources AWS entre redémarrages du conteneur (vérifié empiriquement) : un `docker compose up -d` qui recrée le conteneur repart d'une infra vide. Éviter de le redémarrer une fois l'infra déployée, sauf pour repartir de zéro (§7 + §8).
+> Floci ne persiste pas l'état des ressources AWS entre redémarrages du conteneur : `docker compose up -d` qui recrée le conteneur repart d'une infra vide. Éviter de le redémarrer une fois l'infra déployée, sauf pour repartir de zéro (§7 + §8).
 
 ## 6. Provider Terraform (pattern commun à tous les modules)
 
@@ -138,11 +137,11 @@ ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
 ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # doit annoncer 0 changement
 ```
 
-> **Sur macOS** : la tâche qui lit le secret RDS (lookup `amazon.aws.secretsmanager_secret`, exécuté sur le contrôleur) fait planter le worker Ansible forké (`[ERROR]: A worker was found in a dead state`) — bug connu d'incompatibilité entre le `fork()` d'Ansible et le runtime Objective-C de macOS dès qu'une lib réseau/SSL (ici boto3/botocore) est utilisée après le fork. Contournement : préfixer les commandes `ansible-playbook`/`ansible` par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`.
+> **Sur macOS** : le lookup Secrets Manager fait planter le worker Ansible forké (`A worker was found in a dead state`). Préfixer les commandes `ansible-playbook`/`ansible` par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`.
 
 Endpoint applicatif : `terraform -chdir=terraform output alb_dns_name` (ex. `http://ticket-shop-dev-alb-xxxx.elb.localhost.floci.io/`). Détails du rôle, de l'inventaire dynamique et des limites Docker-in-Docker rencontrées : [ansible/README.md](ansible/README.md).
 
-> **Limitation Floci connue (corrigée côté rôle Ansible)** : l'ALB émulé réécrit le header `Host` d'origine en `<private_ip>:80` au lieu de le préserver, ce qui faisait boucler indéfiniment la redirection canonique de PrestaShop sur `alb_dns_name`. Le rôle `prestashop` force désormais ce header à la bonne valeur via un `RequestHeader set Host` Apache (`mod_headers`) déployé automatiquement — aucune action manuelle requise, l'endpoint `alb_dns_name` répond directement en `200 OK`. Détail : [terraform/README.md §6](terraform/README.md#6-limitations-connues-dues-à-floci-pas-au-code).
+> **Limitation Floci (corrigée côté rôle Ansible)** : l'ALB émulé réécrit le header `Host` en `<private_ip>:80`, ce qui faisait boucler la redirection canonique de PrestaShop. Le rôle `prestashop` force ce header à la bonne valeur (`RequestHeader set Host`, `mod_headers`) — rien à faire côté opérateur. Détail : [terraform/README.md §6](terraform/README.md#6-limitations-connues-dues-à-floci-pas-au-code).
 
 ## 9. Secrets
 

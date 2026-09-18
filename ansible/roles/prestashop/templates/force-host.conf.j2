@@ -1,17 +1,8 @@
 # Généré par Ansible — ne pas modifier à la main.
 #
-# L'ALB émulé par Floci ne transmet pas le header Host d'origine au backend :
-# il le réécrit avec l'IP privée:port de l'instance cible (vérifié par
-# capture réseau). PrestaShop compare ce header à PS_SHOP_DOMAIN et, en cas
-# de désaccord, redirige vers son domaine canonique — ce qui boucle
-# indéfiniment puisque chaque redirection repasse par le même ALB cassé.
-# On force donc ici le header Host vu par PHP à la valeur attendue, avant
-# qu'il n'atteigne l'application. Sur un vrai AWS (ALB qui préserve le
-# Host d'origine), ce fichier devient un no-op inoffensif.
-#
-# `early` est indispensable : sans lui, RequestHeader ne s'applique qu'à la
-# phase "fixup", après le traitement mod_rewrite du .htaccess — les règles
-# de réécriture d'images de PrestaShop (conditionnées sur %{HTTP_HOST})
-# continueraient donc à voir le Host non corrigé et ne matcheraient jamais,
-# cassant toutes les images produit malgré un Host correct côté PHP.
+# L'ALB Floci réécrit le Host reçu par l'instance en <private_ip>:80 au lieu
+# de le préserver, ce qui fait boucler la redirection canonique de PrestaShop
+# à l'infini. On force donc le Host à la bonne valeur avant qu'il n'atteigne
+# l'appli. `early` est nécessaire pour que mod_rewrite (règles d'images) le
+# voie aussi, pas seulement PHP. No-op sur un vrai AWS.
 RequestHeader set Host "{{ alb_dns_name }}" early

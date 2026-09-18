@@ -6,32 +6,22 @@
 
 - name: Configurer les instances PrestaShop
   hosts: prestashop
-  # La collecte de facts s'exécute avant les pre_tasks (ordre standard
-  # Ansible), donc avant le bootstrap Python ci-dessous — elle échouerait
-  # sur l'image Debian minimale sans Python. On la désactive ici et on la
-  # relance explicitement dans les pre_tasks, une fois Python présent.
+  # gather_facts tourne avant pre_tasks, donc avant le bootstrap Python
+  # ci-dessous. Désactivé ici, relancé une fois Python installé.
   gather_facts: false
   become: true
 
   vars:
     docker_install_compose_plugin: true
-    # Les instances Floci sont elles-mêmes des conteneurs Docker : overlay2
-    # imbriqué dans overlay2 échoue sur certaines images (whiteout files mal
-    # gérés — erreur reproductible avec l'image PrestaShop).
-    # fuse-overlayfs (solution standard pour Docker-in-Docker, plus rapide
-    # que vfs) a été testé mais ne démarre pas ici : dockerd reste bloqué
-    # au montage FUSE, probablement une capacité SYS_ADMIN/mount refusée
-    # par le conteneur "instance" de Floci. vfs (copies complètes, plus
-    # lent mais fiable) reste donc la seule option qui fonctionne dans cet
-    # environnement imbriqué. Sur un vrai EC2 (pas de nesting), overlay2
-    # (le défaut) serait le bon choix — aucun des deux ne serait nécessaire.
+    # overlay2 (défaut) casse en Docker-in-Docker imbriqué sur Floci
+    # (whiteout files). fuse-overlayfs testé aussi, bloqué au montage FUSE.
+    # vfs est la seule option qui marche ici ; sur un vrai EC2, overlay2
+    # suffirait.
     docker_daemon_options:
       storage-driver: vfs
 
   pre_tasks:
-    # L'image Debian minimale de Floci n'a pas Python : aucun module Ansible
-    # "normal" ne peut s'exécuter avant. `raw` est le seul module qui n'en a
-    # pas besoin. Idempotent : ne réinstalle rien si python3 est déjà là.
+    # Image sans Python : raw est le seul module utilisable avant bootstrap.
     - name: Amorcer Python3 si absent
       ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3)
       changed_when: false
@@ -40,6 +30,5 @@
       ansible.builtin.setup:
 
   roles:
-    # Installé depuis Ansible Galaxy : on ne réécrit pas ce qui existe déjà.
-    - geerlingguy.docker
+    - geerlingguy.docker # rôle Galaxy
     - prestashop

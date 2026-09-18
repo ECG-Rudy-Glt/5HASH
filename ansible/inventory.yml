@@ -1,18 +1,8 @@
 ---
-# L'inventaire dynamique.
-#
-# Ce fichier ne décrit aucune machine : il déclare le greffon qui va les
-# trouver. Le greffon lit le state Terraform (project_path), y repère les
-# ressources ansible_host et ansible_group (voir terraform/ansible.tf), et en
-# fabrique l'inventaire — hôtes, groupes et variables comprises.
-#
-# Conséquence : aucune adresse n'est recopiée à la main. Si l'Auto Scaling
-# Group remplace une instance, l'inventaire suit au prochain `terraform apply`
-# / rafraîchissement du state.
-#
-# project_path est relatif au dossier depuis lequel Ansible est lancé — la
-# racine du dépôt (`ansible-inventory -i ansible/inventory.yml ...`), pas ce
-# fichier. Le dossier terraform/ doit être initialisé (`terraform init`).
+# Inventaire dynamique : ce fichier ne décrit aucune machine, il déclare le
+# greffon qui lit le state Terraform (project_path) et en fabrique
+# l'inventaire (ansible_host/ansible_group, voir terraform/ansible.tf).
+# project_path est relatif à la racine du dépôt, d'où Ansible est lancé.
 
 plugin: cloud.terraform.terraform_provider
 project_path: terraform

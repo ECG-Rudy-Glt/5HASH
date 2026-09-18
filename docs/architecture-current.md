@@ -43,7 +43,7 @@ flowchart TB
 ## Ce qui est en place
 
 - **Réseau** : 1 VPC, 2 subnets publics + 2 subnets privés (2 AZ), Internet Gateway, NAT Gateway + EIP, tables de routage.
-- **Sécurité** : 3 security groups (`alb`, `app`, `database`) déclarés avec les bonnes restrictions logiques — ⚠️ non appliquées par Floci (voir limite documentée dans [`modules/security/main.tf`](../terraform/modules/security/main.tf) et confirmée par [floci-io/floci#2564](https://github.com/floci-io/floci/issues/2564)).
+- **Sécurité** : 3 security groups (`alb`, `app`, `database`) déclarés avec les bonnes restrictions logiques — non appliquées par Floci (voir limite documentée dans [`modules/security/main.tf`](../terraform/modules/security/main.tf) et confirmée par [floci-io/floci#2564](https://github.com/floci-io/floci/issues/2564)).
 - **Calcul** : ALB public + target group (health check `/`) + listener HTTP, Launch Template, Auto Scaling Group (2-4 instances), policy de scaling target-tracking CPU.
 - **Base de données** : RDS MySQL en subnet privé, mot de passe généré (`random_password`), publié dans un secret Secrets Manager unique (`ticket-shop/rds/master`) au format JSON (`username`, `password`, `host`, `port`, `dbname`).
 

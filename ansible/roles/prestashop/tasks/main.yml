@@ -45,3 +45,23 @@
     mode: "0640"
   no_log: true
   notify: Redéployer PrestaShop
+
+# Le handler ne se déclenche que si la config a changé, donc jamais si un
+# run précédent a échoué après coup (ex. pull d'image en erreur) : le
+# conteneur reste absent mais le run suivant annonce "0 changement". Ce
+# contrôle force le redéploiement dans ce cas.
+# docker inspect plutôt que docker_container_info : évite d'installer le
+# SDK Python docker sur la cible, seul le CLI est nécessaire.
+- name: Vérifier que le conteneur PrestaShop tourne réellement
+  ansible.builtin.command:
+    cmd: docker inspect -f '{{ "{{" }}.State.Running{{ "}}" }}' {{ prestashop_app_dir | basename }}-prestashop-1
+  register: prestashop_container_state
+  changed_when: false
+  failed_when: false
+
+- name: Forcer le redéploiement si le conteneur est absent ou arrêté
+  ansible.builtin.debug:
+    msg: "Conteneur PrestaShop absent ou arrêté (probable échec transitoire au run précédent) — redéploiement forcé."
+  changed_when: true
+  when: prestashop_container_state.rc != 0 or prestashop_container_state.stdout | trim != 'true'
+  notify: Redéployer PrestaShop
