@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "Région AWS "
+  description = "Région AWS"
   type        = string
   default     = "us-east-1"
 }
@@ -22,7 +22,7 @@ variable "environment" {
 }
 
 variable "multi_az" {
-  description = "RDS Multi-AZ (haute disponibilité) — activé en staging/prod"
+  description = "RDS Multi-AZ (haute disponibilité) — activé en prod"
   type        = bool
   default     = false
 }
@@ -34,18 +34,21 @@ variable "azs" {
 }
 
 variable "vpc_cidr" {
-  type    = string
-  default = "10.0.0.0/16"
+  description = "Bloc CIDR du VPC"
+  type        = string
+  default     = "10.0.0.0/16"
 }
 
 variable "public_subnet_cidrs" {
-  type    = list(string)
-  default = ["10.0.0.0/24", "10.0.1.0/24"]
+  description = "Blocs CIDR des subnets publics (un par AZ)"
+  type        = list(string)
+  default     = ["10.0.0.0/24", "10.0.1.0/24"]
 }
 
 variable "private_subnet_cidrs" {
-  type    = list(string)
-  default = ["10.0.10.0/24", "10.0.11.0/24"]
+  description = "Blocs CIDR des subnets privés (un par AZ)"
+  type        = list(string)
+  default     = ["10.0.10.0/24", "10.0.11.0/24"]
 }
 
 variable "ami_id" {
@@ -55,36 +58,43 @@ variable "ami_id" {
 }
 
 variable "instance_type" {
-  type    = string
-  default = "t3.micro"
+  description = "Type d'instance EC2 applicative"
+  type        = string
+  default     = "t3.micro"
 }
 
 variable "ssh_public_key" {
-  description = "Clé publique SSH (Ansible) — fournie par l'appelant, jamais committée"
+  description = "Clé publique SSH (Ansible). Par défaut : contenu de .keys/ticket_shop.pub à la racine du dépôt"
   type        = string
+  default     = null
 }
 
 variable "min_size" {
-  type    = number
-  default = 2
+  description = "Nombre minimum d'instances dans l'ASG"
+  type        = number
+  default     = 1
 }
 
 variable "max_size" {
-  type    = number
-  default = 4
+  description = "Nombre maximum d'instances dans l'ASG"
+  type        = number
+  default     = 2
 }
 
 variable "desired_capacity" {
-  type    = number
-  default = 2
+  description = "Nombre d'instances souhaité dans l'ASG (aussi le nombre d'hôtes de l'inventaire Ansible)"
+  type        = number
+  default     = 1
 }
 
 variable "db_name" {
-  type    = string
-  default = "prestashop"
+  description = "Nom de la base PrestaShop"
+  type        = string
+  default     = "prestashop"
 }
 
 variable "db_username" {
-  type    = string
-  default = "prestashop_admin"
+  description = "Utilisateur master RDS"
+  type        = string
+  default     = "prestashop_admin"
 }

@@ -1,11 +1,9 @@
-# NOTE : Floci accepte et restitue ces security groups (describe/ingress rules)
-# mais ne les applique pas comme un vrai firewall (pas de filtrage réel du trafic
-# conteneur-à-conteneur). Elles sont néanmoins déclarées correctement ici pour
-# que le code soit portable tel quel vers un compte AWS réel.
+# Floci enregistre ces security groups mais ne filtre pas réellement le trafic.
+# Ils restent corrects pour un vrai compte AWS.
 
 resource "aws_security_group" "alb" {
   name_prefix = "${var.name}-alb-"
-  description = "ALB public - HTTP/HTTPS depuis Internet"
+  description = "ALB public - HTTP depuis Internet"
   vpc_id      = var.vpc_id
 
   ingress {

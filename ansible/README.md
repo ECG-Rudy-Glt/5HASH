@@ -1,89 +1,75 @@
-# Ansible — Taylor Shift's Ticket Shop
+# Ansible : Taylor Shift's Ticket Shop
 
-Configuration des instances provisionnées par Terraform et déploiement de PrestaShop (image Docker Hub générique), connecté à la base RDS.
+Ansible configure les instances provisionnées par Terraform et y déploie PrestaShop (image Docker Hub `prestashop/prestashop:8-apache`), connecté à RDS. Pour la séquence de lancement, voir le [README racine §5](../README.md#5-déploiement).
 
-## 1. Principe : rien n'est écrit à la main
-
-L'inventaire, les adresses, les identifiants de base de données : rien de tout ça n'est saisi manuellement. Terraform décrit l'inventaire directement dans son state ([`terraform/ansible.tf`](../terraform/ansible.tf), ressources `ansible_host`/`ansible_group`), et [`ansible/inventory.yml`](inventory.yml) se contente de déclarer le greffon `cloud.terraform.terraform_provider` qui va le lire. Si l'Auto Scaling Group remplace une instance, l'inventaire suit automatiquement au prochain `terraform apply`.
-
-## 2. Structure
+## 1. Structure
 
 ```
-ansible.cfg                  # à la racine du dépôt (pas dans ansible/) — voir §3
+ansible.cfg                  à la racine du dépôt (voir §2)
 ansible/
-  requirements.yml           # collections + rôle Galaxy, épinglés
-  inventory.yml               # déclare le greffon d'inventaire dynamique
-  site.yml                     # playbook principal
+  requirements.yml           collections et rôle Galaxy, versions épinglées
+  inventory.yml              déclare le plugin d'inventaire dynamique
+  site.yml                   playbook principal
   group_vars/
-    prestashop.yml              # comment joindre les instances (port SSH publié par Floci)
-    all/vault.yml                 # secret applicatif chiffré (Ansible Vault)
+    prestashop.yml           accès SSH aux instances Floci
+    all/vault.yml            identifiants admin PrestaShop (chiffrés par Vault)
   roles/
-    prestashop/                   # notre rôle
-    geerlingguy.docker/           # installé depuis Galaxy (gitignored)
+    prestashop/              notre rôle : defaults, tasks, templates, handlers
+    geerlingguy.docker/      installé depuis Galaxy (gitignoré)
 ```
 
-## 3. Pourquoi `ansible.cfg` est à la racine du dépôt
+## 2. Pourquoi `ansible.cfg` est à la racine
 
-La séquence de test de l'énoncé s'exécute **depuis la racine**, jamais depuis `ansible/` :
+La séquence de test s'exécute depuis la racine du dépôt, et Ansible ne lit que le `ansible.cfg` du répertoire courant. Ce fichier :
 
-```sh
-ansible-galaxy install -r ansible/requirements.yml
-ansible-inventory -i ansible/inventory.yml --graph
-ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
-```
+- autorise le plugin `cloud.terraform.terraform_provider` (`enable_plugins`) ;
+- redirige `roles_path` et `collections_path` vers `ansible/`, pour ne pas toucher au `~/.ansible` global.
 
-Ansible ne cherche `ansible.cfg` que dans le répertoire courant (`./ansible.cfg`) — il doit donc être à la racine pour être détecté automatiquement, pas dans `ansible/`. C'est lui qui : autorise explicitement le greffon d'inventaire (`enable_plugins`, un greffon doit toujours être déclaré), et redirige `roles_path`/`collections_path` vers `ansible/roles`/`ansible/collections` (projet auto-contenu, pas de pollution du `~/.ansible` global).
+Si `ANSIBLE_CONFIG` est défini dans le shell, il est prioritaire sur ce fichier : dans ce cas, faire `unset ANSIBLE_CONFIG`.
 
-> Si `ANSIBLE_CONFIG` est déjà défini dans ton shell, il prend le pas sur ce fichier. Vérifier avec `ansible-config dump --only-changed | grep CONFIG_FILE`, `unset ANSIBLE_CONFIG` si besoin.
+## 3. Inventaire dynamique
 
-## 4. L'inventaire dynamique
+[inventory.yml](inventory.yml) ne contient que `plugin: cloud.terraform.terraform_provider` et `project_path: terraform`. Hôtes et variables viennent du state Terraform ([terraform/ansible.tf](../terraform/ansible.tf)) :
 
-[`terraform/ansible.tf`](../terraform/ansible.tf) déclare :
-- `ansible_host` (un par instance de l'ASG) : porte `floci_instance` (l'ID réel), `private_ip`, et le **chemin** (jamais le contenu) de la clé SSH privée.
-- `ansible_group "prestashop"` : porte ce que Terraform sait et qu'Ansible ignore — l'ARN du secret RDS, l'endpoint/port de la base, le nom DNS de l'ALB.
+- **par hôte** : `floci_instance` (id de l'instance), `private_ip`, et le **chemin** de la clé SSH privée (jamais son contenu) ;
+- **groupe `prestashop`** : `db_secret_arn`, `db_endpoint`, `db_port`, `alb_dns_name`, `app_environment`.
 
-Contrainte spécifique à un Auto Scaling Group (pas des `aws_instance` fixes) : les IDs d'instances ne sont connus qu'à l'`apply`, donc impossible de faire un `for_each` direct dessus (« Invalid for_each argument »). La ressource utilise des **clés statiques** (`0`, `1`, ... selon `desired_capacity`) et ne laisse que la **valeur** dépendre de l'apply, via `element()`.
+L'inventaire est mis à jour à chaque `terraform apply`.
 
-## 5. Les deux secrets, deux mécanismes
+## 4. Secrets
 
-| Secret | Origine | Où il vit | Comment Ansible l'obtient |
-|---|---|---|---|
-| Mot de passe RDS | Généré par Terraform (`random_password`) | AWS Secrets Manager | Lookup `amazon.aws.secretsmanager_secret` (voir [`roles/prestashop/tasks/main.yml`](roles/prestashop/tasks/main.yml)), à partir du seul ARN transmis par l'inventaire |
-| Identifiants admin PrestaShop | Appartiennent au dépôt Ansible | [`group_vars/all/vault.yml`](group_vars/all/vault.yml), chiffré | Ansible Vault (`--ask-vault-pass` / `--vault-password-file`) |
+| Secret | Où il vit | Comment Ansible l'obtient |
+|---|---|---|
+| Identifiants RDS | AWS Secrets Manager (créé par Terraform) | Lookup `amazon.aws.secretsmanager_secret` à partir du seul ARN transmis par l'inventaire |
+| Identifiants admin PrestaShop | [group_vars/all/vault.yml](group_vars/all/vault.yml), chiffré | Ansible Vault (`--ask-vault-pass`) |
 
-Le mot de passe RDS n'est **jamais** dupliqué dans Vault — one endroit, une seule source de vérité. Le lookup Secrets Manager s'exécute sur le **contrôleur** (ce poste), pas sur l'instance distante : `boto3`/`botocore` doivent donc être installés localement (`sudo apt install python3-boto3 python3-botocore`), pas sur les EC2.
+- **Pas de copie** : le mot de passe RDS n'est jamais recopié dans Vault.
+- **Lookup local** : il s'exécute sur le contrôleur. `boto3` et `botocore` doivent donc être installés dans l'environnement Python d'Ansible (`pipx inject ansible-core boto3 botocore`), pas sur les instances.
+- **`no_log: true`** : il est posé sur les tâches qui manipulent un secret déchiffré, pour qu'il n'apparaisse ni dans les logs ni dans `--diff`.
 
-`no_log: true` est posé sur toute tâche qui manipule un secret déchiffré : Vault protège la valeur *stockée*, pas la valeur *utilisée* — une fois déchiffrée, elle traverserait sinon les logs et le `--diff`.
+## 5. Playbook et rôle `prestashop`
 
-## 6. Le rôle `prestashop`
+`site.yml` :
 
-1. Crée le répertoire de l'application.
-2. Lit le secret RDS (Secrets Manager).
-3. Template [`docker-compose.yml.j2`](roles/prestashop/templates/docker-compose.yml.j2) avec les identifiants DB + Vault → **notifie** le handler `Redéployer PrestaShop`.
-4. Le handler ne s'exécute **que si le template a changé** — c'est ce qui garantit l'idempotence : rien à faire, rien ne se redéploie.
+1. installe Python avec `raw` si besoin (l'image Debian n'en a pas), puis collecte les facts ;
+2. applique le rôle Galaxy `geerlingguy.docker` ;
+3. applique le rôle `prestashop`.
 
-Le port du conteneur est publié sur l'**IP privée précise de l'instance**, jamais `0.0.0.0` (cf. commentaire dans le template) — une écoute large entre en conflit avec le service de métadonnées interne de Floci.
+Le rôle `prestashop` :
 
-## 7. Lancer
+1. crée `/opt/prestashop` ;
+2. lit le secret RDS ;
+3. génère `force-host.conf` et `docker-compose.yml` à partir de leurs templates, puis **notifie** le handler `Redéployer PrestaShop` ;
+4. vérifie que le conteneur tourne. Sinon, par exemple après un run interrompu, il force le handler ;
+5. exécute tout de suite le handler (`flush_handlers`), puis attend que `/` et `/admin-ticketshop/` répondent 200 (`uri`, jusqu'à 15 min) ;
+6. affiche les URL de la boutique et du back-office.
 
-```sh
-docker compose up -d                                    # Floci
-cd terraform && terraform apply && cd ..                # infra + inventaire
+**Idempotence** : le handler ne s'exécute que si un template a changé ou si le conteneur est absent. Le second passage doit donc afficher `changed=0`.
 
-ansible-galaxy install -r ansible/requirements.yml
-ansible-inventory -i ansible/inventory.yml --graph
+## 6. Limites dues à Floci
 
-ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
-ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # doit annoncer 0 changement
-```
-
-> **Sur macOS**, préfixer les commandes `ansible-playbook`/`ansible-inventory` par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` — sinon le worker forké plante sur le lookup Secrets Manager. Voir §8.
-
-## 8. Limites connues (environnement Floci, pas le code)
-
-- **Driver de stockage Docker forcé en `vfs`** : les instances Floci sont elles-mêmes des conteneurs Docker ; `overlay2` (le défaut) casse sur certaines images en imbriqué (erreur `whiteout file`). `fuse-overlayfs` (solution standard pour Docker-in-Docker, plus rapide) a été testée mais le montage FUSE reste bloqué dans ce conteneur — probablement une capacité refusée. `vfs` (copies complètes, plus lent mais fiable) est donc la seule option qui fonctionne ici. Sur un vrai EC2, aucun des deux ne serait nécessaire.
-- **Image Debian minimale sans Python** : bootstrap via `ansible.builtin.raw` en `pre_tasks`, seul module qui n'en a pas besoin. Piège d'ordonnancement : la collecte de facts Ansible s'exécute par défaut *avant* les `pre_tasks`, donc avant que Python ne soit installé — [`site.yml`](site.yml) désactive `gather_facts` au niveau du play et rappelle explicitement `ansible.builtin.setup:` dans les `pre_tasks`, une fois Python bootstrapé.
-- **`ansible-core` trop ancien sur le contrôleur** : `geerlingguy.docker` utilise `ansible.builtin.deb822_repository` (≥ 2.15). Le paquet `apt` Debian/Ubuntu traîne souvent en dessous (`2.14.18` sur Debian 12). Installer via `pipx`/`pip` — voir README racine §4.
-- **Pas de vrai firewall** : les security groups sont déclarées correctement mais Floci ne les applique pas réellement — voir [`terraform/modules/security/main.tf`](../terraform/modules/security/main.tf).
-- **macOS** : worker Ansible qui plante sur le lookup Secrets Manager — voir l'avertissement plus haut.
-- **ALB Floci qui ne transmet pas le header `Host`** : boucle de redirection infinie sinon. Corrigé côté rôle `prestashop` (`force-host.conf` + `mod_headers`) — détail dans [`terraform/README.md` §6](../terraform/README.md#6-limitations-connues-dues-à-floci-pas-au-code).
+- **Docker en `vfs`** : les instances Floci sont elles-mêmes des conteneurs, et `overlay2` échoue en Docker-in-Docker (erreur *whiteout*). `fuse-overlayfs` est bloqué au montage FUSE. `vfs` est plus lent mais fonctionne. Sur un vrai EC2, `overlay2` suffit.
+- **Accès SSH** : l'IP privée n'est pas joignable depuis le poste. [group_vars/prestashop.yml](group_vars/prestashop.yml) se connecte donc à `127.0.0.1`, sur le port SSH que Floci publie pour chaque instance (`docker port`). Sur AWS, `ansible_host` serait l'IP privée, via un bastion.
+- **Port 80 lié à l'IP privée, pas à `0.0.0.0`** : sinon, conflit avec le service de métadonnées interne de Floci.
+- **Header `Host` réécrit par l'ALB** : corrigé par `force-host.conf`, qui fixe aussi `ServerName` pour que les redirections d'Apache ne renvoient pas vers l'IP privée. Voir [terraform/README.md §4](../terraform/README.md#4-limites-dues-à-floci).
+- **Clés d'hôte SSH non vérifiées** (`ansible.cfg`), parce que les instances sont éphémères. À réactiver sur des instances durables.

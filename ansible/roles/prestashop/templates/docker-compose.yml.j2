@@ -1,15 +1,12 @@
-# Généré par Ansible à partir de ce que Terraform et Vault ont transmis —
-# ne pas modifier à la main : ce fichier est réécrit à chaque passage.
+# Géré par Ansible, ne pas modifier à la main.
 services:
   prestashop:
     image: {{ prestashop_image }}
     restart: unless-stopped
-    # a2enmod headers : requis par force-host.conf. Module déjà présent dans
-    # l'image, pas besoin d'image custom.
+    # mod_headers est requis par force-host.conf.
     command: sh -c "a2enmod headers && exec /tmp/docker_run.sh"
     ports:
-      # IP précise de l'instance, pas 0.0.0.0 : conflit sinon avec le socat
-      # de métadonnées interne de Floci (169.254.169.254:80).
+      # Pas 0.0.0.0 : conflit avec le service de métadonnées de Floci sur le port 80.
       - "{{ private_ip }}:{{ prestashop_http_port }}:80"
     volumes:
       - prestashop_data:/var/www/html
@@ -24,7 +21,7 @@ services:
       PS_DOMAIN: "{{ alb_dns_name }}"
       ADMIN_MAIL: "{{ vault_ps_admin_mail }}"
       ADMIN_PASSWD: "{{ vault_ps_admin_passwd }}"
-      PS_FOLDER_ADMIN: admin
+      PS_FOLDER_ADMIN: "{{ prestashop_admin_folder }}"
       PS_ERASE_DB: "0"
 
 volumes:

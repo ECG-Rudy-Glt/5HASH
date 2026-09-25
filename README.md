@@ -1,166 +1,204 @@
-# Taylor Shift's Ticket Shop — Infrastructure
+# Taylor Shift's Ticket Shop : Infrastructure
 
-Déploiement et exploitation de l'infrastructure hébergeant l'application e-commerce PrestaShop (billetterie de concerts), provisionnée avec Terraform et configurée avec Ansible, sur un environnement AWS émulé localement avec **Floci** (`http://localhost.floci.io:4566`).
+Ce dépôt héberge PrestaShop, la billetterie de concerts de Taylor Shift. L'infrastructure est provisionnée par **Terraform** et configurée par **Ansible**. Elle tourne sur **Floci**, un émulateur AWS local (`http://localhost.floci.io:4566`) : aucun compte AWS n'est nécessaire.
 
-Docs détaillées : [terraform/README.md](terraform/README.md) (infra) · [ansible/README.md](ansible/README.md) (configuration) · [docs/architecture-current.md](docs/architecture-current.md) (schéma à jour) · [docs/architecture-multi-region.md](docs/architecture-multi-region.md) (plan multi-région).
+> L'application n'est donc joignable que depuis la machine qui exécute Floci. Le code, lui, est portable tel quel vers un vrai compte AWS : seuls les endpoints du provider changent.
 
-> **Cible = Floci, pas AWS réel.** L'énoncé prévoit que l'évaluateur accède à un endpoint réel — ici, ça suppose que Floci tourne sur la machine qui sert d'évaluation (voir §5). Pas d'accès public en dehors de cette machine tant qu'on ne bascule pas sur du vrai AWS.
+Documentation détaillée :
+- [docs/architecture.md](docs/architecture.md) : schéma, fonctionnement et justification des choix ;
+- [terraform/README.md](terraform/README.md) : modules, environnements, limites Floci ;
+- [ansible/README.md](ansible/README.md) : inventaire dynamique, rôle, secrets.
 
 ## 1. Architecture
 
-```
-                         Internet
-                            │
-                    ┌───────▼────────┐
-                    │  ALB (public)  │  SG: 80 depuis 0.0.0.0/0
-                    └───────┬────────┘
-                            │ target group (health check /)
-              ┌─────────────┴─────────────┐
-      ┌───────▼───────┐           ┌───────▼───────┐
-      │ EC2 (subnet    │   ...     │ EC2 (subnet    │   Auto Scaling Group
-      │ privé) PrestaShop│         │ privé) PrestaShop│  SG: 80 depuis ALB SG uniquement
-      │ (Docker, via   │           │ (Docker, via   │
-      │ Ansible)       │           │ Ansible)       │
-      └───────┬───────┘           └───────┬───────┘
-              └─────────────┬─────────────┘
-                    ┌────────▼────────┐
-                    │  RDS MySQL       │  subnet privé
-                    │  (managé)        │  SG: 3306 depuis EC2 SG uniquement
-                    └──────────────────┘
-```
+ALB public → Auto Scaling Group d'EC2 en subnets privés (PrestaShop en Docker, configuré par Ansible) → RDS MySQL managé.
 
-- **Réseau** : 1 VPC, 2 AZ, subnets publics (ALB, NAT) et privés (EC2, RDS).
-- **Calcul** : Auto Scaling Group d'instances EC2 exécutant PrestaShop via Docker (déployé par Ansible), derrière un Application Load Balancer.
-- **Base de données** : Amazon RDS MySQL, managée, hors du périmètre de scaling applicatif. Multi-AZ activable par environnement (`multi_az`, activé en `prod`).
-- **Secret RDS** : mot de passe généré par Terraform, publié dans Secrets Manager, lu par Ansible au déploiement (jamais dupliqué).
-- **État Terraform** : backend S3 + verrouillage natif (bootstrap manuel documenté en §7).
+Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.md](docs/architecture.md)**.
 
-### Pourquoi ce découpage EC2 / managé
+## 2. Trafic et scaling
 
-- RDS géré simplifie la haute disponibilité, les sauvegardes et le failover — un composant qu'on ne veut pas réinventer avec Ansible.
-- EC2 + Docker pour PrestaShop respecte la contrainte « au moins une instance EC2 provisionnée par Terraform et configurée par Ansible » tout en gardant le contrôle sur la configuration applicative.
+- Les requêtes arrivent sur l'ALB, qui les répartit entre les instances saines du target group (health check HTTP `/` toutes les 15 s).
+- L'ASG ajuste le nombre d'instances avec une politique de *target tracking* à 60 % de CPU moyen, entre `min_size` et `max_size`.
+- **Si une instance devient indisponible** :
+  1. après 3 health checks en échec (environ 45 s), l'ALB cesse de lui envoyer du trafic et les autres instances absorbent la charge ;
+  2. l'ASG (health check de type `ELB`) la termine et en lance une nouvelle.
+- **Limites** :
+  - une instance neuve n'est configurée qu'au prochain `terraform apply` suivi d'`ansible-playbook` ;
+  - pas de stockage partagé (EFS) ni de sessions partagées ;
+  - RDS reste le goulot d'étranglement, faute de cache ;
+  - une seule NAT Gateway.
 
-### Ce qui n'est pas encore fait
+## 3. Prérequis
 
-- **Stockage partagé (EFS)** pour les médias/uploads PrestaShop entre instances scalées — pas encore codé. Tant que ce n'est pas en place, le scaling horizontal fonctionne pour la charge HTTP mais pas pour la cohérence des fichiers uploadés (chaque instance a son propre volume Docker).
-- **Sessions PHP** non partagées entre instances (pas de sticky sessions ALB ni de store externalisé) — un panier peut être perdu lors d'un basculement d'instance.
-- Voir [docs/architecture-current.md](docs/architecture-current.md) pour l'état détaillé du code par rapport à cette cible.
+| Outil | Version | Pourquoi |
+|---|---|---|
+| Docker + Compose | récent | Fait tourner Floci (et les « instances EC2 » qu'il émule) |
+| Terraform | ≥ 1.10 | `use_lockfile` du backend S3 |
+| AWS CLI | v2 | Crée le bucket du backend dans Floci |
+| ansible-core | ≥ 2.15 | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien |
+| boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste |
 
-## 2. Gestion du trafic et scaling
+**Floci ne s'installe pas** : c'est une image Docker, téléchargée par `docker compose up` (§4).
 
-- Le trafic entre par l'ALB, réparti vers les cibles saines du target group (health check HTTP `/`, intervalle 15s).
-- L'ASG scale horizontalement sur une politique de target tracking CPU.
-- **Instance indisponible** : l'ALB cesse de router vers une cible qui échoue au health check ; l'ASG détecte l'instance `Unhealthy`, la termine et en relance une nouvelle automatiquement.
-- **Limites connues** :
-  - Sessions PHP non partagées (voir ci-dessus).
-  - Pas de stockage média partagé (EFS) — voir ci-dessus.
-  - Pas de cache applicatif (Redis/ElastiCache) : sous forte charge, la base de données reste le goulot d'étranglement principal.
-  - Le failover RDS Multi-AZ (quand activé) entraîne une coupure de quelques dizaines de secondes.
-
-## 3. Structure du dépôt
-
-```
-compose.yml                  # lance Floci (émulateur AWS local, port 4566)
-ansible.cfg                  # à la racine — voir ansible/README.md §3
-terraform/
-  provider.tf, backend.tf, versions.tf
-  main.tf, variables.tf, locals.tf, outputs.tf
-  ansible.tf                 # inventaire décrit par Terraform (ansible_host/ansible_group)
-  envs/
-    dev.tfvars, staging.tfvars, prod.tfvars
-  modules/
-    network/ security/ compute/ database/
-ansible/
-  inventory.yml               # dynamic inventory via cloud.terraform.terraform_provider
-  requirements.yml            # collections & rôle Galaxy
-  site.yml
-  group_vars/
-    prestashop.yml              # comment joindre les instances (port SSH Floci)
-    all/vault.yml                 # secrets chiffrés (Ansible Vault)
-  roles/
-    prestashop/                   # notre rôle
-    geerlingguy.docker/           # installé depuis Galaxy (gitignored)
-docs/
-  architecture-current.md
-  architecture-multi-region.md
-```
-
-## 4. Prérequis
-
-- Docker (pour Floci et pour PrestaShop sur les instances).
-- Terraform >= 1.5, **Ansible-core >= 2.15** (testé en 2.19 et 2.20), AWS CLI.
-  > `geerlingguy.docker` utilise `ansible.builtin.deb822_repository`, ajouté en ansible-core 2.15. Le paquet `apt` sur Debian/Ubuntu stable est souvent plus vieux (`2.14.18` sur Debian 12) : installer via `pipx install ansible-core` plutôt que `apt`.
-- `python3-boto3`/`python3-botocore` sur le poste de contrôle (lookup Ansible qui lit le secret RDS, pas sur les instances). Sur macOS, injecter dans l'environnement d'Ansible : `pipx inject ansible-core boto3 botocore`.
-- Une paire de clés SSH pour Ansible : `mkdir -p .keys && ssh-keygen -t ed25519 -f .keys/ticket_shop -N ""` (`.keys/` est gitignored — `ssh-keygen` ne crée pas le dossier parent tout seul, d'où le `mkdir -p`).
-- Pas de compte AWS réel requis : toute l'infra est émulée localement par **Floci**.
-
-## 5. Démarrer Floci
+**Debian / Ubuntu** :
 
 ```sh
+# Docker (se reconnecter ensuite pour que le groupe docker soit pris en compte)
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"
+
+# Terraform (dépôt HashiCorp)
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install -y terraform
+
+# AWS CLI v2
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
+
+# Ansible (via pipx, pas apt) + boto3
+sudo apt install -y pipx && pipx ensurepath
+pipx install ansible-core
+pipx inject ansible-core boto3 botocore
+```
+
+**macOS** : installer Docker Desktop, puis :
+
+```sh
+brew tap hashicorp/tap && brew install hashicorp/tap/terraform awscli pipx
+pipx install ansible-core && pipx inject ansible-core boto3 botocore
+```
+
+Vérifier : `docker compose version`, `terraform version`, `aws --version`, `ansible --version`.
+
+## 4. Mise en place, à faire une fois avant la séquence de test
+
+```sh
+# 1. Démarrer Floci (publie aussi le port 80, écouté par l'ALB)
 docker compose up -d
-```
 
-Floci écoute sur `http://localhost.floci.io:4566` (identifiants factices `test`/`test` — Floci ne les vérifie jamais, rien à protéger). Ce compose publie aussi le port `80` (écoute HTTP de l'ALB) sur l'hôte.
+# 2. Générer la clé SSH d'Ansible. Terraform lit .keys/ticket_shop.pub par défaut.
+mkdir -p .keys && ssh-keygen -t ed25519 -f .keys/ticket_shop -N ""
 
-> Floci ne persiste pas l'état des ressources AWS entre redémarrages du conteneur : `docker compose up -d` qui recrée le conteneur repart d'une infra vide. Éviter de le redémarrer une fois l'infra déployée, sauf pour repartir de zéro (§7 + §8).
-
-## 6. Provider Terraform (pattern commun à tous les modules)
-
-Voir [terraform/provider.tf](terraform/provider.tf) — un seul bloc `provider "aws"` pour tout le projet, avec un `endpoints {}` par service utilisé (`ec2`, `elb`, `elbv2`, `autoscaling`, `rds`, `secretsmanager`, `s3`, `iam`, `sts`).
-
-## 7. Bootstrap du backend Terraform (à faire une seule fois)
-
-Le bucket S3 utilisé comme backend doit exister avant `terraform init`. Le verrouillage est géré nativement par le backend `s3` (`use_lockfile = true`, Terraform ≥ 1.10) — pas besoin de table DynamoDB.
-
-```sh
-export AWS_ACCESS_KEY_ID=test
-export AWS_SECRET_ACCESS_KEY=test
-
+# 3. Créer le bucket du backend Terraform (le verrouillage use_lockfile ne demande pas de DynamoDB)
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test   # identifiants factices de Floci
 aws --endpoint-url=http://localhost.floci.io:4566 --region us-east-1 \
   s3api create-bucket --bucket ticket-shop-tfstate
 aws --endpoint-url=http://localhost.floci.io:4566 --region us-east-1 \
   s3api put-bucket-versioning --bucket ticket-shop-tfstate --versioning-configuration Status=Enabled
 ```
 
-Backend déclaré dans [terraform/backend.tf](terraform/backend.tf). Détails complets, environnements (dev/staging/prod) et limitations : [terraform/README.md](terraform/README.md).
+Le backend est déclaré dans [terraform/backend.tf](terraform/backend.tf).
 
-## 8. Déploiement
+> Floci ne conserve rien quand son conteneur est recréé, ni les ressources ni le bucket de state. Après un redémarrage, reprendre à l'étape 3.
+
+**Clés et identifiants : rien n'est fourni, rien n'est à demander.**
+
+- **Clé SSH** (étape 2) : chacun génère la sienne, et elle n'est jamais versionnée (`.keys/` est gitignoré).
+  - La **publique** est lue par Terraform et injectée dans les instances.
+  - La **privée** reste sur le poste. Ansible n'en reçoit que le chemin, via l'inventaire.
+  - Si la clé est régénérée après un `apply`, les instances existantes gardent l'ancienne : relancer `terraform apply`, puis remplacer les instances (voir §8).
+- **Identifiants AWS** : `test`/`test` sont des valeurs factices que Floci ne vérifie jamais. Il n'y a ni compte ni clé AWS à créer.
+
+**4. Mot de passe Ansible Vault.** Les identifiants admin de PrestaShop sont chiffrés dans [ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml). Deux possibilités :
+
+- **Mot de passe de l'équipe** : il sera demandé par `--ask-vault-pass`. Pour ne pas le retaper, le mettre dans un fichier gitignoré et remplacer `--ask-vault-pass` par `--vault-password-file .vault-pass` :
+  ```sh
+  printf '%s' 'le-mot-de-passe' > .vault-pass && chmod 600 .vault-pass
+  ```
+- **Sans ce mot de passe** : recréer le fichier avec le sien. `ansible-vault` demande un nouveau mot de passe puis ouvre un éditeur :
+  ```sh
+  rm ansible/group_vars/all/vault.yml
+  ansible-vault create ansible/group_vars/all/vault.yml
+  ```
+  Contenu à saisir (le mot de passe admin doit faire au moins 8 caractères) :
+  ```yaml
+  vault_ps_admin_mail: admin@example.com
+  vault_ps_admin_passwd: ChangeMe-2026
+  ```
+
+## 5. Déploiement
 
 ```sh
 terraform -chdir=terraform init
-terraform -chdir=terraform apply -var-file=envs/dev.tfvars -var "ssh_public_key=$(cat .keys/ticket_shop.pub)"
-
+terraform -chdir=terraform apply
 ansible-galaxy install -r ansible/requirements.yml
 ansible-inventory -i ansible/inventory.yml --graph
-
 ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
-ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # doit annoncer 0 changement
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # changed=0 attendu
 ```
 
-> **Sur macOS** : le lookup Secrets Manager fait planter le worker Ansible forké (`A worker was found in a dead state`). Préfixer les commandes `ansible-playbook`/`ansible` par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`.
+Sans `-var-file`, Terraform applique les valeurs par défaut, identiques à `dev` (1 instance). Les autres environnements sont décrits au §6.
 
-Endpoint applicatif : `terraform -chdir=terraform output alb_dns_name` (ex. `http://ticket-shop-dev-alb-xxxx.elb.localhost.floci.io/`). Détails du rôle, de l'inventaire dynamique et des limites Docker-in-Docker rencontrées : [ansible/README.md](ansible/README.md).
+> Si `ANSIBLE_CONFIG` est défini dans ton shell, lancer `unset ANSIBLE_CONFIG` avant : il remplace le `ansible.cfg` du dépôt.
+>
+> **macOS** : préfixer les commandes `ansible-*` par `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`, sinon le worker plante sur le lookup Secrets Manager.
 
-> **Limitation Floci (corrigée côté rôle Ansible)** : l'ALB émulé réécrit le header `Host` en `<private_ip>:80`, ce qui faisait boucler la redirection canonique de PrestaShop. Le rôle `prestashop` force ce header à la bonne valeur (`RequestHeader set Host`, `mod_headers`) — rien à faire côté opérateur. Détail : [terraform/README.md §6](terraform/README.md#6-limitations-connues-dues-à-floci-pas-au-code).
+**Endpoint** : lancer `terraform -chdir=terraform output alb_dns_name`, puis ouvrir `http://<valeur>/` (par exemple `http://ticket-shop-dev-alb-xxxx.elb.localhost.floci.io/`).
 
-## 9. Secrets
+Le premier playbook dure environ 15 minutes : il installe Docker, puis attend que PrestaShop ait fini de s'installer dans RDS. À la fin, il affiche les deux URL :
+- **boutique** : `http://<alb_dns_name>/` ;
+- **back-office** : `http://<alb_dns_name>/admin-ticketshop/`, avec les identifiants du Vault.
 
-Aucun secret en clair dans le dépôt, deux mécanismes selon l'origine :
+Pour vérifier la connexion à la base : la vitrine affiche le catalogue de démonstration, que PrestaShop a écrit dans RDS au premier démarrage (`PS_INSTALL_AUTO`).
+
+## 6. Environnements (dev / staging / prod)
+
+Chaque environnement a son **workspace** Terraform (state isolé) et son **fichier de variables**. Toutes les ressources sont nommées `ticket-shop-<env>-*`. Terraform refuse d'appliquer si le workspace ne correspond pas à `environment` (`default` ↔ dev).
+
+```sh
+terraform -chdir=terraform workspace new staging   # une seule fois
+terraform -chdir=terraform workspace select staging
+terraform -chdir=terraform apply -var-file=envs/staging.tfvars
+```
+
+| Env | Workspace | Instance | ASG min/max/desired | RDS Multi-AZ |
+|---|---|---|---|---|
+| dev | `default` | t3.micro | 1 / 2 / 1 | non |
+| staging | `staging` | t3.micro | 2 / 3 / 2 | non |
+| prod | `prod` | t3.small | 2 / 6 / 2 | oui |
+
+## 7. Secrets
+
+Le dépôt ne contient aucun secret en clair.
 
 | Secret | Généré par | Stocké dans | Lu par Ansible via |
 |---|---|---|---|
 | Mot de passe RDS | Terraform (`random_password`) | Secrets Manager | lookup `amazon.aws.secretsmanager_secret` |
-| Identifiants admin PrestaShop | Défini par l'équipe | Ansible Vault (`ansible/group_vars/all/vault.yml`) | `--ask-vault-pass` |
+| Identifiants admin PrestaShop | l'équipe | Ansible Vault ([ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml)) | `--ask-vault-pass` |
+| Clé SSH | `ssh-keygen` | `.keys/` (gitignoré) | chemin transmis par l'inventaire, jamais le contenu |
 
-Détail complet : [ansible/README.md §5](ansible/README.md#5-les-deux-secrets-deux-mécanismes).
+## 8. Exploitation et maintenance
 
-## 10. Exploitation / maintenance
+- **Mettre à jour l'application** : modifier `prestashop_image` ou les templates du rôle `prestashop`, puis relancer `ansible-playbook`. Le handler ne redéploie le conteneur que si sa configuration a changé.
+- **Changer la capacité** : modifier `min_size`, `max_size` ou `desired_capacity` dans `envs/<env>.tfvars`, lancer `terraform apply`, puis `ansible-playbook` pour configurer les nouvelles instances.
+- **Remplacer une instance** (y compris après un changement d'AMI ou de type) : lancer un *instance refresh* sur l'ASG, puis `terraform apply` et `ansible-playbook`.
+- **Faire tourner le mot de passe RDS** : `terraform -chdir=terraform apply -replace=module.database.random_password.master`, puis `ansible-playbook`, qui relit le secret et redéploie.
+- **Consulter les logs** : `docker logs prestashop-prestashop-1` sur l'instance. Ils ne sont pas encore centralisés.
 
-- **Mettre à jour l'application** : modifier le rôle `prestashop` (tag d'image, variables) puis rejouer `ansible-playbook` — le handler ne redéploie que si la configuration a changé.
-- **Scaling manuel** : ajuster `min_size`/`max_size`/`desired_capacity` dans `envs/<env>.tfvars` puis `terraform apply`.
-- **Rotation du secret RDS** : `terraform taint module.database.random_password.master` puis `apply` — le secret Secrets Manager est republié automatiquement, Ansible le relira au prochain déploiement.
-- **Logs applicatifs** : `docker logs` sur le conteneur PrestaShop de chaque instance (accès via Ansible/SSH, pas encore centralisé — piste d'amélioration).
+### Tout supprimer et redéployer de zéro
 
-## 11. Contexte projet
+```sh
+unset ANSIBLE_CONFIG                                   # si défini : il remplacerait le ansible.cfg du dépôt
+terraform -chdir=terraform workspace select default
+terraform -chdir=terraform destroy
+terraform -chdir=terraform workspace delete staging    # seulement s'il existe et que son state est vide
+terraform -chdir=terraform apply
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # changed=0 attendu
+```
 
-Projet de groupe (3 personnes) — module 5HASH Supinfo. Voir l'énoncé complet dans [`readme`](readme) (brief original, traduit en français).
+Pour supprimer staging ou prod, sélectionner d'abord le workspace correspondant et ajouter `-var-file=envs/<env>.tfvars` au `destroy`.
+
+## 9. Structure du dépôt
+
+```
+compose.yml            Floci
+ansible.cfg            à la racine, pour être détecté par la séquence de test (voir ansible/README.md)
+terraform/             modules network, security, compute, database ; ansible.tf ; envs/*.tfvars
+ansible/               inventory.yml, requirements.yml, site.yml, group_vars/, roles/prestashop/
+docs/architecture.md   schéma et justification des choix
+```
+
+Projet réalisé par MAZZON Paul, BOULAND Hugo et GAULT Rudy, module 5HASH, Supinfo.

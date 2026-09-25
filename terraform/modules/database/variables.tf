@@ -9,27 +9,32 @@ variable "private_subnet_ids" {
 }
 
 variable "database_sg_id" {
-  type = string
+  description = "Security group de l'instance RDS"
+  type        = string
 }
 
 variable "engine" {
-  type    = string
-  default = "mysql"
+  description = "Moteur RDS"
+  type        = string
+  default     = "mysql"
 }
 
 variable "engine_version" {
-  type    = string
-  default = "8.0"
+  description = "Version du moteur RDS"
+  type        = string
+  default     = "8.0"
 }
 
 variable "instance_class" {
-  type    = string
-  default = "db.t3.micro"
+  description = "Classe d'instance RDS"
+  type        = string
+  default     = "db.t3.micro"
 }
 
 variable "allocated_storage" {
-  type    = number
-  default = 20
+  description = "Stockage alloué (Go)"
+  type        = number
+  default     = 20
 }
 
 variable "db_name" {
