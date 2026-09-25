@@ -1,6 +1,6 @@
-# Terraform — Taylor Shift's Ticket Shop
+# Terraform : Taylor Shift's Ticket Shop
 
-Mise en place et déploiement : [README racine](../README.md) §4 et §5. Schéma et limites d'architecture : [docs/architecture.md](../docs/architecture.md).
+Mise en place et déploiement : [README racine](../README.md) §4 et §5. Schéma et choix d'architecture : [docs/architecture.md](../docs/architecture.md).
 
 ## 1. Organisation
 

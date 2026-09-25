@@ -1,4 +1,4 @@
-# Ansible — Taylor Shift's Ticket Shop
+# Ansible : Taylor Shift's Ticket Shop
 
 Ansible configure les instances provisionnées par Terraform et y déploie PrestaShop (image Docker Hub `prestashop/prestashop:8-apache`), connecté à RDS. Pour la séquence de lancement, voir le [README racine §5](../README.md#5-déploiement).
 
