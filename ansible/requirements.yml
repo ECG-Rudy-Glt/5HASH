@@ -1,6 +1,4 @@
 ---
-# Dépendances épinglées. Installation : ansible-galaxy install -r requirements.yml
-
 collections:
   - name: cloud.terraform # inventaire dynamique, lit le state Terraform
     version: "4.0.0"

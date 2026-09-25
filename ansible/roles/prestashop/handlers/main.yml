@@ -1,8 +1,4 @@
 ---
-# Ne se déclenche que si la tâche "Déposer le docker-compose de PrestaShop"
-# a réellement changé le fichier — c'est ce qui rend le playbook idempotent :
-# un deuxième passage sans changement ne redéploie rien.
-
 - name: Redéployer PrestaShop
   community.docker.docker_compose_v2:
     project_src: "{{ prestashop_app_dir }}"

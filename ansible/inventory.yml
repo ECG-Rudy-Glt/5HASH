@@ -1,8 +1,4 @@
 ---
-# Inventaire dynamique : ce fichier ne décrit aucune machine, il déclare le
-# greffon qui lit le state Terraform (project_path) et en fabrique
-# l'inventaire (ansible_host/ansible_group, voir terraform/ansible.tf).
-# project_path est relatif à la racine du dépôt, d'où Ansible est lancé.
-
+# Hôtes et groupes définis dans terraform/ansible.tf. Chemin relatif à la racine du dépôt.
 plugin: cloud.terraform.terraform_provider
 project_path: terraform

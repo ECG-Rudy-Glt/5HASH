@@ -1,8 +1,8 @@
-# Généré par Ansible — ne pas modifier à la main.
-#
-# L'ALB Floci réécrit le Host reçu par l'instance en <private_ip>:80 au lieu
-# de le préserver, ce qui fait boucler la redirection canonique de PrestaShop
-# à l'infini. On force donc le Host à la bonne valeur avant qu'il n'atteigne
-# l'appli. `early` est nécessaire pour que mod_rewrite (règles d'images) le
-# voie aussi, pas seulement PHP. No-op sur un vrai AWS.
+# Géré par Ansible, ne pas modifier à la main.
+# L'ALB Floci réécrit Host en <private_ip>:80, ce qui fait boucler la redirection
+# de PrestaShop. `early` rend le header visible aussi par mod_rewrite.
 RequestHeader set Host "{{ alb_dns_name }}" early
+
+# Les redirections générées par Apache (ex. /admin → /admin/) utilisent ce nom.
+ServerName {{ alb_dns_name }}
+UseCanonicalName On

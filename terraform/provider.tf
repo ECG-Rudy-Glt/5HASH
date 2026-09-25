@@ -1,5 +1,4 @@
-# Provider pointé vers Floci (émulateur AWS local, http://localhost.floci.io:4566)
-# Même pattern que workshop-2 : identifiants factices, validations réelles désactivées.
+# Floci (émulateur AWS local) : identifiants factices, validations désactivées.
 provider "aws" {
   region     = var.aws_region
   access_key = "test"
@@ -15,16 +14,14 @@ provider "aws" {
   }
 
   endpoints {
-    ec2                   = "http://localhost.floci.io:4566"
-    elb                   = "http://localhost.floci.io:4566"
-    elbv2                 = "http://localhost.floci.io:4566"
-    autoscaling           = "http://localhost.floci.io:4566"
-    rds                   = "http://localhost.floci.io:4566"
-    efs                   = "http://localhost.floci.io:4566"
-    secretsmanager        = "http://localhost.floci.io:4566"
-    s3                    = "http://localhost.floci.io:4566"
-    dynamodb              = "http://localhost.floci.io:4566"
-    iam                   = "http://localhost.floci.io:4566"
-    sts                   = "http://localhost.floci.io:4566"
+    ec2            = "http://localhost.floci.io:4566"
+    elb            = "http://localhost.floci.io:4566"
+    elbv2          = "http://localhost.floci.io:4566"
+    autoscaling    = "http://localhost.floci.io:4566"
+    rds            = "http://localhost.floci.io:4566"
+    secretsmanager = "http://localhost.floci.io:4566"
+    s3             = "http://localhost.floci.io:4566"
+    iam            = "http://localhost.floci.io:4566"
+    sts            = "http://localhost.floci.io:4566"
   }
 }

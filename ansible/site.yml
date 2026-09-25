@@ -1,32 +1,24 @@
 ---
-# Playbook principal — Taylor Shift's Ticket Shop.
-#
-# Aucun hôte n'est nommé : le groupe "prestashop" vient de l'inventaire
-# dynamique (ansible/inventory.yml), donc du state Terraform.
-
 - name: Configurer les instances PrestaShop
   hosts: prestashop
-  # gather_facts tourne avant pre_tasks, donc avant le bootstrap Python
-  # ci-dessous. Désactivé ici, relancé une fois Python installé.
+  # Facts collectés dans pre_tasks, après l'installation de Python.
   gather_facts: false
   become: true
 
   vars:
     docker_install_compose_plugin: true
-    # overlay2 (défaut) casse en Docker-in-Docker imbriqué sur Floci
-    # (whiteout files). fuse-overlayfs testé aussi, bloqué au montage FUSE.
-    # vfs est la seule option qui marche ici ; sur un vrai EC2, overlay2
-    # suffirait.
+    # overlay2 et fuse-overlayfs échouent en Docker-in-Docker sur Floci.
+    # Sur un vrai EC2, overlay2 suffit.
     docker_daemon_options:
       storage-driver: vfs
 
   pre_tasks:
-    # Image sans Python : raw est le seul module utilisable avant bootstrap.
     - name: Amorcer Python3 si absent
-      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3)
-      changed_when: false
+      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3 && echo PYTHON_BOOTSTRAPPED)
+      register: python_bootstrap
+      changed_when: "'PYTHON_BOOTSTRAPPED' in python_bootstrap.stdout"
 
-    - name: Collecter les facts (Python est maintenant disponible)
+    - name: Collecter les facts
       ansible.builtin.setup:
 
   roles:

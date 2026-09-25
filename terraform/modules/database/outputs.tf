@@ -1,9 +1,11 @@
 output "endpoint" {
-  value = aws_db_instance.this.address
+  description = "Adresse de l'instance RDS"
+  value       = aws_db_instance.this.address
 }
 
 output "port" {
-  value = aws_db_instance.this.port
+  description = "Port de l'instance RDS"
+  value       = aws_db_instance.this.port
 }
 
 output "secret_arn" {

@@ -1,11 +1,4 @@
 ---
-# Le rôle prestashop : déploie le conteneur PrestaShop (image générique
-# Docker Hub) connecté à la base RDS provisionnée par Terraform.
-#
-# Le mot de passe RDS n'est jamais recopié à la main ni stocké dans Ansible
-# Vault : il est lu à la volée dans Secrets Manager, à partir du seul ARN que
-# Terraform a transmis (db_secret_arn, voir terraform/ansible.tf).
-
 - name: Créer le répertoire de l'application
   ansible.builtin.file:
     path: "{{ prestashop_app_dir }}"
@@ -14,10 +7,7 @@
     group: root
     mode: "0750"
 
-# Le lookup s'exécute sur le contrôleur (ce poste), pas sur l'instance
-# distante — c'est ce poste qui a accès à Floci / Secrets Manager.
-# no_log : la valeur déchiffrée ne doit apparaître ni dans les logs, ni dans
-# le --diff, une fois sortie du secret.
+# Lookup exécuté sur le contrôleur, pas sur l'instance.
 - name: Lire les identifiants RDS dans Secrets Manager
   ansible.builtin.set_fact:
     prestashop_db_creds: "{{ lookup('amazon.aws.secretsmanager_secret', db_secret_arn,
@@ -46,12 +36,8 @@
   no_log: true
   notify: Redéployer PrestaShop
 
-# Le handler ne se déclenche que si la config a changé, donc jamais si un
-# run précédent a échoué après coup (ex. pull d'image en erreur) : le
-# conteneur reste absent mais le run suivant annonce "0 changement". Ce
-# contrôle force le redéploiement dans ce cas.
-# docker inspect plutôt que docker_container_info : évite d'installer le
-# SDK Python docker sur la cible, seul le CLI est nécessaire.
+# Rattrape un run précédent interrompu après le dépôt des templates : sans ce
+# contrôle, le conteneur resterait absent. docker inspect évite le SDK Python.
 - name: Vérifier que le conteneur PrestaShop tourne réellement
   ansible.builtin.command:
     cmd: docker inspect -f '{{ "{{" }}.State.Running{{ "}}" }}' {{ prestashop_app_dir | basename }}-prestashop-1
@@ -65,3 +51,26 @@
   changed_when: true
   when: prestashop_container_state.rc != 0 or prestashop_container_state.stdout | trim != 'true'
   notify: Redéployer PrestaShop
+
+- name: Appliquer les redéploiements en attente
+  ansible.builtin.meta: flush_handlers
+
+# Le premier démarrage installe PrestaShop dans RDS : plusieurs minutes.
+- name: Attendre que la boutique et le back-office répondent
+  ansible.builtin.uri:
+    url: "http://{{ private_ip }}:{{ prestashop_http_port }}{{ item }}"
+    status_code: 200
+  register: prestashop_http_check
+  until: prestashop_http_check.status == 200
+  retries: 90
+  delay: 10
+  loop:
+    - /
+    - "/{{ prestashop_admin_folder }}/"
+
+- name: Afficher les URL de l'application
+  ansible.builtin.debug:
+    msg:
+      - "Boutique     : http://{{ alb_dns_name }}/"
+      - "Back-office  : http://{{ alb_dns_name }}/{{ prestashop_admin_folder }}/"
+  run_once: true

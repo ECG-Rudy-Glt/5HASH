@@ -19,14 +19,15 @@ resource "aws_db_instance" "this" {
   instance_class = var.instance_class
 
   allocated_storage = var.allocated_storage
-  db_name            = var.db_name
-  username           = var.db_username
-  password           = random_password.master.result
+  db_name           = var.db_name
+  username          = var.db_username
+  password          = random_password.master.result
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [var.database_sg_id]
 
   multi_az            = var.multi_az
+  storage_encrypted   = true
   skip_final_snapshot = true
 
   tags = {
@@ -34,15 +35,12 @@ resource "aws_db_instance" "this" {
   }
 }
 
-# Secret unique, partagé avec Ansible au déploiement (lookup amazon.aws.aws_secret) :
-# évite de dupliquer le mot de passe RDS dans Ansible Vault.
+# Source unique du mot de passe RDS, lue par Ansible (lookup secretsmanager_secret).
 resource "aws_secretsmanager_secret" "db" {
   name = "${var.name}/rds/master"
 
-  # Sans ceci, `terraform destroy` marque le secret pour suppression à J+7 au
-  # lieu de le supprimer immédiatement : un redeploy le lendemain échoue sur
-  # "marked for deletion". En production, on garderait au contraire cette
-  # fenêtre de récupération (ex. 7-30 jours).
+  # Suppression immédiate au destroy, sinon un redeploy échoue sur
+  # "marked for deletion". En prod, garder une fenêtre de 7 à 30 jours.
   recovery_window_in_days = 0
 
   tags = {

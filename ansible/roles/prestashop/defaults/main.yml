@@ -1,17 +1,13 @@
 ---
-# Valeurs par défaut du rôle — la priorité la plus basse : tout group_vars,
-# host_vars ou -e les remplace.
-
 prestashop_image: "prestashop/prestashop:8-apache"
 prestashop_app_dir: /opt/prestashop
 prestashop_http_port: 80
+# Nom non standard : sinon l'installeur renomme admin/ au hasard.
+prestashop_admin_folder: admin-ticketshop
 
-# Nom du secret RDS dans le state Terraform. La valeur réelle est lue via
-# amazon.aws.secretsmanager_secret (jamais écrite ici) — voir tasks/main.yml.
 prestashop_db_secret_region: us-east-1
 
-# Identifiants factices Floci — pas de vrais secrets (cf. terraform/provider.tf,
-# même convention). À changer si on bascule un jour sur du vrai AWS.
+# Identifiants factices Floci, pas des secrets.
 prestashop_floci_access_key: "test"
 prestashop_floci_secret_key: "test"
 prestashop_floci_endpoint: "http://localhost.floci.io:4566"

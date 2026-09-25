@@ -1,9 +1,6 @@
 ---
-# Chaque instance EC2 est en réalité un conteneur Docker, son IP privée
-# n'est pas joignable directement. Floci publie son port SSH sur l'hôte ; on
-# le redemande à chaque connexion via floci_instance (terraform/ansible.tf).
-# Sur un vrai AWS ce fichier n'existerait pas (ansible_host = IP privée).
-
+# Spécifique à Floci : chaque instance est un conteneur dont le port SSH est
+# publié sur l'hôte. Sur un vrai AWS, ansible_host serait l'IP privée.
 ansible_host: 127.0.0.1
 ansible_port: >-
   {{ lookup('ansible.builtin.pipe', 'docker port floci-ec2-' ~ floci_instance ~ ' 22/tcp')

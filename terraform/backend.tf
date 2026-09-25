@@ -1,6 +1,4 @@
-# Backend distant S3 (verrouillage natif "use_lockfile", pas de DynamoDB requis
-# depuis Terraform >= 1.10) — hébergé sur Floci pour le moment.
-# Bootstrap du bucket : voir terraform/README.md §7.
+# Bucket à créer avant `terraform init` : voir README.md §4.
 terraform {
   backend "s3" {
     bucket = "ticket-shop-tfstate"
@@ -14,7 +12,7 @@ terraform {
     skip_metadata_api_check     = true
     skip_requesting_account_id  = true
     skip_region_validation      = true
-    use_path_style               = true
+    use_path_style              = true
     use_lockfile                = true
 
     endpoints = {
