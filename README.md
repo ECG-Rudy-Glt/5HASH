@@ -37,7 +37,7 @@ Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.
 | Docker + Compose | récent | Fait tourner Floci (et les « instances EC2 » qu'il émule) |
 | Terraform | ≥ 1.10 | `use_lockfile` du backend S3 |
 | AWS CLI | v2 | Crée le bucket du backend dans Floci |
-| ansible-core | ≥ 2.15 | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien |
+| ansible-core | ≥ 2.15 et < 2.21 | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien. `cloud.terraform` 4.0.0 est incompatible avec 2.21 |
 | boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste |
 
 **Floci ne s'installe pas** : c'est une image Docker, téléchargée par `docker compose up` (section 4).
@@ -61,7 +61,7 @@ unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
 
 # Ansible (via pipx, pas apt) + boto3
 sudo apt install -y pipx && pipx ensurepath
-pipx install ansible-core
+pipx install 'ansible-core>=2.15,<2.21'
 pipx inject ansible-core boto3 botocore
 ```
 
@@ -69,7 +69,7 @@ pipx inject ansible-core boto3 botocore
 
 ```sh
 brew tap hashicorp/tap && brew install hashicorp/tap/terraform awscli pipx
-pipx install ansible-core && pipx inject ansible-core boto3 botocore
+pipx install 'ansible-core>=2.15,<2.21' && pipx inject ansible-core boto3 botocore
 ```
 
 Vérifier : `docker compose version`, `terraform version`, `aws --version`, `ansible --version`.
