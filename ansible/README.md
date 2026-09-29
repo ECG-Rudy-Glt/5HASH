@@ -1,11 +1,11 @@
 # Ansible : Taylor Shift's Ticket Shop
 
-Ansible configure les instances provisionnées par Terraform et y déploie PrestaShop (image Docker Hub `prestashop/prestashop:8-apache`), connecté à RDS. Pour la séquence de lancement, voir le [README racine §5](../README.md#5-déploiement).
+Ansible configure les instances provisionnées par Terraform et y déploie PrestaShop (image Docker Hub `prestashop/prestashop:8-apache`), connecté à RDS. Pour la séquence de lancement, voir le [README racine, section 5](../README.md#5-déploiement).
 
 ## 1. Structure
 
 ```
-ansible.cfg                  à la racine du dépôt (voir §2)
+ansible.cfg                  à la racine du dépôt (voir section 2)
 ansible/
   requirements.yml           collections et rôle Galaxy, versions épinglées
   inventory.yml              déclare le plugin d'inventaire dynamique
@@ -72,5 +72,5 @@ Le rôle `prestashop` :
 - **Docker en `vfs`** : les instances Floci sont elles-mêmes des conteneurs, et `overlay2` échoue en Docker-in-Docker (erreur *whiteout*). `fuse-overlayfs` est bloqué au montage FUSE. `vfs` est plus lent mais fonctionne. Sur un vrai EC2, `overlay2` suffit.
 - **Accès SSH** : l'IP privée n'est pas joignable depuis le poste. [group_vars/prestashop.yml](group_vars/prestashop.yml) se connecte donc à `127.0.0.1`, sur le port SSH que Floci publie pour chaque instance (`docker port`). Sur AWS, `ansible_host` serait l'IP privée, via un bastion.
 - **Port 80 lié à l'IP privée, pas à `0.0.0.0`** : sinon, conflit avec le service de métadonnées interne de Floci.
-- **Header `Host` réécrit par l'ALB** : corrigé par `force-host.conf`, qui fixe aussi `ServerName` pour que les redirections d'Apache ne renvoient pas vers l'IP privée. Voir [terraform/README.md §4](../terraform/README.md#4-limites-dues-à-floci).
+- **Header `Host` réécrit par l'ALB** : corrigé par `force-host.conf`, qui fixe aussi `ServerName` pour que les redirections d'Apache ne renvoient pas vers l'IP privée. Voir [terraform/README.md, section 4](../terraform/README.md#4-limites-dues-à-floci).
 - **Clés d'hôte SSH non vérifiées** (`ansible.cfg`), parce que les instances sont éphémères. À réactiver sur des instances durables.

@@ -20,28 +20,32 @@ Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.
 
 ## 2. Trafic et scaling
 
-- Les requêtes arrivent sur l'ALB, qui les répartit entre les instances saines du target group (health check HTTP `/` toutes les 15 s).
-- L'ASG ajuste le nombre d'instances avec une politique de _target tracking_ à 60 % de CPU moyen, entre `min_size` et `max_size`.
+
+- Les requêtes arrivent sur l'ALB, qui les répartit entre les instances saines du target group (health check HTTP `/` toutes les 15 s). Un cookie d'affinité de l'ALB (*sticky sessions*, 1 h) garde un client sur la même instance.
+- L'ASG ajuste le nombre d'instances, entre `min_size` et `max_size`, avec deux politiques de *target tracking* : **600 requêtes par instance et par minute** (réagit dès l'arrivée du trafic, utile pour l'ouverture d'une vente) et **60 % de CPU moyen** (filet de sécurité). Il ajoute une instance dès qu'une politique le demande et n'en retire que si les deux sont d'accord.
 - **Si une instance devient indisponible** :
   1. après 3 health checks en échec (environ 45 s), l'ALB cesse de lui envoyer du trafic et les autres instances absorbent la charge ;
-  2. l'ASG (health check de type `ELB`) la termine et en lance une nouvelle.
+  2. l'ASG (health check de type `ELB`) la termine et en lance une nouvelle ;
+  3. les clients qui lui étaient rattachés sont redirigés vers une autre instance et perdent leur session.
 - **Limites** :
-  - une instance neuve n'est configurée qu'au prochain `terraform apply` suivi d'`ansible-playbook` ;
-  - pas de stockage partagé (EFS) ni de sessions partagées ;
+  - une instance neuve n'est configurée qu'au prochain `terraform apply` suivi d'`ansible-playbook`, et met de toute façon plusieurs minutes à démarrer ;
+  - pas de stockage partagé (EFS) ni de sessions partagées : l'affinité ALB atténue le problème sans le résoudre (répartition moins homogène, session perdue si l'instance tombe) ;
+  - le seuil de 600 requêtes est une estimation, à calibrer par test de charge ;
   - RDS reste le goulot d'étranglement, faute de cache ;
   - une seule NAT Gateway.
 
 ## 3. Prérequis
 
-| Outil            | Version                        | Pourquoi                                                                                              |
-| ---------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Docker + Compose | récent                         | Fait tourner Floci (et les « instances EC2 » qu'il émule)                                             |
-| Terraform        | ≥ 1.10                         | `use_lockfile` du backend S3                                                                          |
-| AWS CLI          | v2                             | Crée le bucket du backend dans Floci                                                                  |
-| ansible-core     | ≥ 2.15                         | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien |
-| boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste                                                          |
 
-**Floci ne s'installe pas** : c'est une image Docker, téléchargée par `docker compose up` (§4).
+| Outil | Version | Pourquoi |
+|---|---|---|
+| Docker + Compose | récent | Fait tourner Floci (et les « instances EC2 » qu'il émule) |
+| Terraform | ≥ 1.10 | `use_lockfile` du backend S3 |
+| AWS CLI | v2 | Crée le bucket du backend dans Floci |
+| ansible-core | ≥ 2.15 et < 2.21 | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien. `cloud.terraform` 4.0.0 est incompatible avec 2.21 |
+| boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste |
+
+**Floci ne s'installe pas** : c'est une image Docker, téléchargée par `docker compose up` (section 4).
 
 **Debian / Ubuntu** :
 
@@ -62,7 +66,7 @@ unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
 
 # Ansible (via pipx, pas apt) + boto3
 sudo apt install -y pipx && pipx ensurepath
-pipx install ansible-core
+pipx install 'ansible-core>=2.15,<2.21'
 pipx inject ansible-core boto3 botocore
 ```
 
@@ -70,7 +74,7 @@ pipx inject ansible-core boto3 botocore
 
 ```sh
 brew tap hashicorp/tap && brew install hashicorp/tap/terraform awscli pipx
-pipx install ansible-core && pipx inject ansible-core boto3 botocore
+pipx install 'ansible-core>=2.15,<2.21' && pipx inject ansible-core boto3 botocore
 ```
 
 Vérifier : `docker compose version`, `terraform version`, `aws --version`, `ansible --version`.
@@ -101,7 +105,7 @@ Le backend est déclaré dans [terraform/backend.tf](terraform/backend.tf).
 - **Clé SSH** (étape 2) : chacun génère la sienne, et elle n'est jamais versionnée (`.keys/` est gitignoré).
   - La **publique** est lue par Terraform et injectée dans les instances.
   - La **privée** reste sur le poste. Ansible n'en reçoit que le chemin, via l'inventaire.
-  - Si la clé est régénérée après un `apply`, les instances existantes gardent l'ancienne : relancer `terraform apply`, puis remplacer les instances (voir §8).
+  - Si la clé est régénérée après un `apply`, les instances existantes gardent l'ancienne : relancer `terraform apply`, puis remplacer les instances (voir section 8).
 - **Identifiants AWS** : `test`/`test` sont des valeurs factices que Floci ne vérifie jamais. Il n'y a ni compte ni clé AWS à créer.
 
 **4. Mot de passe Ansible Vault.** Les identifiants admin de PrestaShop sont chiffrés dans [ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml).
@@ -135,7 +139,7 @@ ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
 ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass   # changed=0 attendu
 ```
 
-Sans `-var-file`, Terraform applique les valeurs par défaut, identiques à `dev` (1 instance). Les autres environnements sont décrits au §6.
+Sans `-var-file`, Terraform applique les valeurs par défaut, identiques à `dev` (1 instance). Les autres environnements sont décrits à la section 6.
 
 > Si `ANSIBLE_CONFIG` est défini dans ton shell, lancer `unset ANSIBLE_CONFIG` avant : il remplace le `ansible.cfg` du dépôt.
 >

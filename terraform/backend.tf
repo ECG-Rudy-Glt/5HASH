@@ -1,4 +1,4 @@
-# Bucket à créer avant `terraform init` : voir README.md §4.
+# Bucket à créer avant `terraform init` : voir README.md section 4.
 terraform {
   backend "s3" {
     bucket = "ticket-shop-tfstate"
