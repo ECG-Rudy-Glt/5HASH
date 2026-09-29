@@ -8,7 +8,6 @@
   vars:
     docker_install_compose_plugin: true
     # overlay2 et fuse-overlayfs échouent en Docker-in-Docker sur Floci.
-    # Sur un vrai EC2, overlay2 suffit.
     docker_daemon_options:
       storage-driver: vfs
 

@@ -31,6 +31,12 @@ resource "aws_lb_target_group" "app" {
     unhealthy_threshold = 3
   }
 
+  stickiness {
+    enabled         = true
+    type            = "lb_cookie"
+    cookie_duration = var.stickiness_duration
+  }
+
   tags = {
     Name = "${var.name}-tg"
   }
@@ -106,5 +112,20 @@ resource "aws_autoscaling_policy" "cpu_target_tracking" {
       predefined_metric_type = "ASGAverageCPUUtilization"
     }
     target_value = var.cpu_target_value
+  }
+}
+
+# Réagit au pic de requêtes à l'ouverture de la billetterie avant la saturation CPU ; la politique CPU reste un filet de sécurité (scale-out si l'une des deux le demande, scale-in seulement si les deux sont d'accord)
+resource "aws_autoscaling_policy" "request_count_target_tracking" {
+  name                   = "${var.name}-request-count-target-tracking"
+  autoscaling_group_name = aws_autoscaling_group.app.name
+  policy_type            = "TargetTrackingScaling"
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = "${aws_lb.app.arn_suffix}/${aws_lb_target_group.app.arn_suffix}"
+    }
+    target_value = var.request_count_target_value
   }
 }

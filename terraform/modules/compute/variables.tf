@@ -68,6 +68,18 @@ variable "cpu_target_value" {
   default     = 60
 }
 
+variable "request_count_target_value" {
+  description = "Cible de la politique de scaling target-tracking (requêtes par instance et par minute sur l'ALB)"
+  type        = number
+  default     = 600
+}
+
+variable "stickiness_duration" {
+  description = "Durée (s) du cookie d'affinité de l'ALB : un client reste sur la même instance, dont le volume local porte sa session et son panier"
+  type        = number
+  default     = 3600
+}
+
 variable "health_check_grace_period" {
   description = "Délai (s) avant que l'ASG tienne compte du health check ALB : couvre l'attente puis l'exécution d'Ansible (installation Docker + PrestaShop)"
   type        = number
