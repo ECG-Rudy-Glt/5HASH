@@ -16,6 +16,8 @@ ALB public → Auto Scaling Group d'EC2 en subnets privés (PrestaShop en Docker
 
 Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.md](docs/architecture.md)**.
 
+> **Périmètre volontairement limité** : nous sommes restés proches de la consigne et avons choisi de ne pas complexifier l'architecture avec du cache (ElastiCache/Redis, CDN), de la supervision (Prometheus, Grafana) ou de la centralisation des logs. Ce seraient les premières évolutions pour une vraie mise en production (voir les limites au §2).
+
 ## 2. Trafic et scaling
 
 - Les requêtes arrivent sur l'ALB, qui les répartit entre les instances saines du target group (health check HTTP `/` toutes les 15 s).
@@ -104,7 +106,7 @@ Le backend est déclaré dans [terraform/backend.tf](terraform/backend.tf).
 
 **4. Mot de passe Ansible Vault.** Les identifiants admin de PrestaShop sont chiffrés dans [ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml).
 
-> ⚠️ **Le mot de passe Vault est versionné volontairement** dans [.vault-pass](.vault-pass), à la racine du dépôt. Nous l'avons fait **exprès, pour que l'évaluatrice puisse lancer le playbook** sans nous le demander. Dans un vrai projet, ce fichier serait gitignoré et le mot de passe transmis hors du dépôt (gestionnaire de mots de passe, variable de CI).
+> ⚠️ **Le mot de passe Vault est versionné volontairement** dans [.vault-pass](.vault-pass), à la racine du dépôt. Nous l'avons fait **exprès, pour que vous puissiez lancer le playbook** sans nous le demander. Dans un vrai projet, ce fichier serait gitignoré et le mot de passe transmis hors du dépôt (gestionnaire de mots de passe, variable de CI).
 
 - **Avec `--ask-vault-pass`** (séquence de test) : à l'invite `Vault password:`, saisir le contenu de `.vault-pass` (`cat .vault-pass`).
 - **Sans le retaper** : remplacer `--ask-vault-pass` par `--vault-password-file .vault-pass`.
@@ -141,14 +143,14 @@ Sans `-var-file`, Terraform applique les valeurs par défaut, identiques à `dev
 
 **Endpoint** : lancer `terraform -chdir=terraform output alb_dns_name`, puis ouvrir `http://<valeur>/` (par exemple `http://ticket-shop-dev-alb-xxxx.elb.localhost.floci.io/`).
 
-Le premier playbook dure environ 15 minutes : il installe Docker, puis attend que PrestaShop ait fini de s'installer dans RDS. À la fin, il affiche les deux URL :
+Le premier playbook dure environ 15 minutes : il installe Docker, puis attend que PrestaShop ait fini de s'installer dans RDS. C'est long surtout à cause du driver de stockage Docker **`vfs`**. Les « EC2 » de Floci sont elles-mêmes des conteneurs, et `overlay2` échoue en Docker-in-Docker. `vfs` fonctionne, mais il copie chaque couche de l'image en entier au lieu de les superposer, ce qui rend le démarrage du conteneur PrestaShop très lent. Sur un vrai EC2, avec `overlay2`, cette étape ne prend que quelques minutes (voir [ansible/README.md §6](ansible/README.md#6-limites-dues-à-floci)). À la fin, le playbook affiche les deux URL :
 
 - **boutique** : `http://<alb_dns_name>/` ;
 - **back-office** : `http://<alb_dns_name>/admin-ticketshop/`, avec les identifiants du Vault.
 
-> **Accès depuis un autre poste (Remote SSH, VPN)** : les noms `*.localhost.floci.io` pointent vers `127.0.0.1`. Depuis un autre poste que celui qui fait tourner Floci, le navigateur appelle donc sa propre machine (`ERR_CONNECTION_REFUSED`). Le port local doit rester **80**, car PrestaShop redirige vers son domaine, sans numéro de port.
+> **Accès depuis un autre poste (Remote SSH, VPN) comme mon cas personnel (rudy)** : les noms `*.localhost.floci.io` pointent vers `127.0.0.1`. Depuis un autre poste que celui qui fait tourner Floci, le navigateur appelle donc sa propre machine (`ERR_CONNECTION_REFUSED`). Le port local doit rester **80**, car PrestaShop redirige vers son domaine, sans numéro de port.
 >
-> - **Remote SSH (VS Code)** : onglet **Ports**, transférer le port `80` et vérifier que l'adresse locale est `localhost:80`. Sinon, clic droit → *Change Local Address Port* → `80`.
+> - **Remote SSH (VS Code)** : onglet **Ports**, transférer le port `80` et vérifier que l'adresse locale est `localhost:80`. Sinon, clic droit → _Change Local Address Port_ → `80`.
 > - **SSH en ligne de commande** : lancer, **sur son poste**, `sudo ssh -i ~/.ssh/<clé> -L 80:localhost:80 <user>@<ip-machine-floci>`. Le `sudo` est nécessaire pour ouvrir le port 80 en local sous Linux et macOS.
 > - **VPN / même réseau** : Floci publie le port 80 sur toutes les interfaces. Il suffit d'ajouter au fichier hosts du poste (`/etc/hosts`, ou `C:\Windows\System32\drivers\etc\hosts`) la ligne `<ip-machine-floci> <alb_dns_name>`, puis d'ouvrir `http://<alb_dns_name>/`.
 
@@ -176,7 +178,7 @@ Le dépôt ne contient aucun secret en clair, sauf le mot de passe Vault (`.vaul
 
 | Secret                        | Généré par                    | Stocké dans                                                                          | Lu par Ansible via                                   |
 | ----------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| Mot de passe RDS              | Terraform (`random_password`) | Secrets Manager                                                                      | lookup `amazon.aws.secretsmanager_secret`            |
+| Mot de passe RDS              | Terraform (`random_password`) | Secrets Manager                                                                      | lookup`amazon.aws.secretsmanager_secret`             |
 | Identifiants admin PrestaShop | l'équipe                      | Ansible Vault ([ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml)) | `--ask-vault-pass` (mot de passe dans `.vault-pass`) |
 | Clé SSH                       | `ssh-keygen`                  | `.keys/` (gitignoré)                                                                 | chemin transmis par l'inventaire, jamais le contenu  |
 
