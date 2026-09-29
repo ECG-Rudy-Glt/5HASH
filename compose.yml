@@ -1,6 +1,7 @@
 services:
   floci:
     image: floci/floci@sha256:4e451c39c7bb88e3cd4f87e8fc0c25d5b47695a51185d521e2241fa00486e8eb # 2.0.1
+    # image épinglée par digest : la version de Floci ne peut pas changer entre deux déploiements.
     ports:
       - "4566:4566"
       - "80:80"

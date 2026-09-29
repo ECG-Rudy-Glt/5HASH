@@ -1,10 +1,11 @@
 # Taylor Shift's Ticket Shop : Infrastructure
 
-Ce dépôt héberge PrestaShop, la billetterie de concerts de Taylor Shift. L'infrastructure est provisionnée par **Terraform** et configurée par **Ansible**. Elle tourne sur **Floci**, un émulateur AWS local (`http://localhost.floci.io:4566`) : aucun compte AWS n'est nécessaire.
+Ce dépôt héberge le projet de fin de module 5HASH : la billetterie PrestaShop de Taylor Shift. L'infrastructure est provisionnée par **Terraform** et configurée par **Ansible**. Elle tourne sur **Floci**, un émulateur AWS local (`http://localhost.floci.io:4566`) comme vu en cours : aucun compte AWS n'est nécessaire. Floci a cependant des limites, détaillées dans [terraform/README.md §4](terraform/README.md#4-limites-dues-à-floci) et [ansible/README.md §6](ansible/README.md#6-limites-dues-à-floci).
 
 > L'application n'est donc joignable que depuis la machine qui exécute Floci. Le code, lui, est portable tel quel vers un vrai compte AWS : seuls les endpoints du provider changent.
 
 Documentation détaillée :
+
 - [docs/architecture.md](docs/architecture.md) : schéma, fonctionnement et justification des choix ;
 - [terraform/README.md](terraform/README.md) : modules, environnements, limites Floci ;
 - [ansible/README.md](ansible/README.md) : inventaire dynamique, rôle, secrets.
@@ -18,7 +19,7 @@ Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.
 ## 2. Trafic et scaling
 
 - Les requêtes arrivent sur l'ALB, qui les répartit entre les instances saines du target group (health check HTTP `/` toutes les 15 s).
-- L'ASG ajuste le nombre d'instances avec une politique de *target tracking* à 60 % de CPU moyen, entre `min_size` et `max_size`.
+- L'ASG ajuste le nombre d'instances avec une politique de _target tracking_ à 60 % de CPU moyen, entre `min_size` et `max_size`.
 - **Si une instance devient indisponible** :
   1. après 3 health checks en échec (environ 45 s), l'ALB cesse de lui envoyer du trafic et les autres instances absorbent la charge ;
   2. l'ASG (health check de type `ELB`) la termine et en lance une nouvelle.
@@ -30,13 +31,13 @@ Schéma, fonctionnement et justification de chaque choix : **[docs/architecture.
 
 ## 3. Prérequis
 
-| Outil | Version | Pourquoi |
-|---|---|---|
-| Docker + Compose | récent | Fait tourner Floci (et les « instances EC2 » qu'il émule) |
-| Terraform | ≥ 1.10 | `use_lockfile` du backend S3 |
-| AWS CLI | v2 | Crée le bucket du backend dans Floci |
-| ansible-core | ≥ 2.15 | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien |
-| boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste |
+| Outil            | Version                        | Pourquoi                                                                                              |
+| ---------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Docker + Compose | récent                         | Fait tourner Floci (et les « instances EC2 » qu'il émule)                                             |
+| Terraform        | ≥ 1.10                         | `use_lockfile` du backend S3                                                                          |
+| AWS CLI          | v2                             | Crée le bucket du backend dans Floci                                                                  |
+| ansible-core     | ≥ 2.15                         | `geerlingguy.docker` utilise `deb822_repository`. Le paquet `apt` de Debian 12 (2.14) est trop ancien |
+| boto3 / botocore | dans l'environnement d'Ansible | Lookup Secrets Manager, exécuté sur le poste                                                          |
 
 **Floci ne s'installe pas** : c'est une image Docker, téléchargée par `docker compose up` (§4).
 
@@ -101,18 +102,21 @@ Le backend est déclaré dans [terraform/backend.tf](terraform/backend.tf).
   - Si la clé est régénérée après un `apply`, les instances existantes gardent l'ancienne : relancer `terraform apply`, puis remplacer les instances (voir §8).
 - **Identifiants AWS** : `test`/`test` sont des valeurs factices que Floci ne vérifie jamais. Il n'y a ni compte ni clé AWS à créer.
 
-**4. Mot de passe Ansible Vault.** Les identifiants admin de PrestaShop sont chiffrés dans [ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml). Deux possibilités :
+**4. Mot de passe Ansible Vault.** Les identifiants admin de PrestaShop sont chiffrés dans [ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml).
 
-- **Mot de passe de l'équipe** : il sera demandé par `--ask-vault-pass`. Pour ne pas le retaper, le mettre dans un fichier gitignoré et remplacer `--ask-vault-pass` par `--vault-password-file .vault-pass` :
-  ```sh
-  printf '%s' 'le-mot-de-passe' > .vault-pass && chmod 600 .vault-pass
-  ```
-- **Sans ce mot de passe** : recréer le fichier avec le sien. `ansible-vault` demande un nouveau mot de passe puis ouvre un éditeur :
+> ⚠️ **Le mot de passe Vault est versionné volontairement** dans [.vault-pass](.vault-pass), à la racine du dépôt. Nous l'avons fait **exprès, pour que l'évaluatrice puisse lancer le playbook** sans nous le demander. Dans un vrai projet, ce fichier serait gitignoré et le mot de passe transmis hors du dépôt (gestionnaire de mots de passe, variable de CI).
+
+- **Avec `--ask-vault-pass`** (séquence de test) : à l'invite `Vault password:`, saisir le contenu de `.vault-pass` (`cat .vault-pass`).
+- **Sans le retaper** : remplacer `--ask-vault-pass` par `--vault-password-file .vault-pass`.
+- **Avec son propre mot de passe** : recréer le fichier Vault. `ansible-vault` demande un nouveau mot de passe puis ouvre un éditeur :
+
   ```sh
   rm ansible/group_vars/all/vault.yml
   ansible-vault create ansible/group_vars/all/vault.yml
   ```
+
   Contenu à saisir (le mot de passe admin doit faire au moins 8 caractères) :
+
   ```yaml
   vault_ps_admin_mail: admin@example.com
   vault_ps_admin_passwd: ChangeMe-2026
@@ -138,8 +142,15 @@ Sans `-var-file`, Terraform applique les valeurs par défaut, identiques à `dev
 **Endpoint** : lancer `terraform -chdir=terraform output alb_dns_name`, puis ouvrir `http://<valeur>/` (par exemple `http://ticket-shop-dev-alb-xxxx.elb.localhost.floci.io/`).
 
 Le premier playbook dure environ 15 minutes : il installe Docker, puis attend que PrestaShop ait fini de s'installer dans RDS. À la fin, il affiche les deux URL :
+
 - **boutique** : `http://<alb_dns_name>/` ;
 - **back-office** : `http://<alb_dns_name>/admin-ticketshop/`, avec les identifiants du Vault.
+
+> **Accès depuis un autre poste (Remote SSH, VPN)** : les noms `*.localhost.floci.io` pointent vers `127.0.0.1`. Depuis un autre poste que celui qui fait tourner Floci, le navigateur appelle donc sa propre machine (`ERR_CONNECTION_REFUSED`). Le port local doit rester **80**, car PrestaShop redirige vers son domaine, sans numéro de port.
+>
+> - **Remote SSH (VS Code)** : onglet **Ports**, transférer le port `80` et vérifier que l'adresse locale est `localhost:80`. Sinon, clic droit → *Change Local Address Port* → `80`.
+> - **SSH en ligne de commande** : lancer, **sur son poste**, `sudo ssh -i ~/.ssh/<clé> -L 80:localhost:80 <user>@<ip-machine-floci>`. Le `sudo` est nécessaire pour ouvrir le port 80 en local sous Linux et macOS.
+> - **VPN / même réseau** : Floci publie le port 80 sur toutes les interfaces. Il suffit d'ajouter au fichier hosts du poste (`/etc/hosts`, ou `C:\Windows\System32\drivers\etc\hosts`) la ligne `<ip-machine-floci> <alb_dns_name>`, puis d'ouvrir `http://<alb_dns_name>/`.
 
 Pour vérifier la connexion à la base : la vitrine affiche le catalogue de démonstration, que PrestaShop a écrit dans RDS au premier démarrage (`PS_INSTALL_AUTO`).
 
@@ -153,27 +164,27 @@ terraform -chdir=terraform workspace select staging
 terraform -chdir=terraform apply -var-file=envs/staging.tfvars
 ```
 
-| Env | Workspace | Instance | ASG min/max/desired | RDS Multi-AZ |
-|---|---|---|---|---|
-| dev | `default` | t3.micro | 1 / 2 / 1 | non |
-| staging | `staging` | t3.micro | 2 / 3 / 2 | non |
-| prod | `prod` | t3.small | 2 / 6 / 2 | oui |
+| Env     | Workspace | Instance | ASG min/max/desired | RDS Multi-AZ |
+| ------- | --------- | -------- | ------------------- | ------------ |
+| dev     | `default` | t3.micro | 1 / 2 / 1           | non          |
+| staging | `staging` | t3.micro | 2 / 3 / 2           | non          |
+| prod    | `prod`    | t3.small | 2 / 6 / 2           | oui          |
 
 ## 7. Secrets
 
-Le dépôt ne contient aucun secret en clair.
+Le dépôt ne contient aucun secret en clair, sauf le mot de passe Vault (`.vault-pass`), versionné exprès pour l'évaluation (voir §4).
 
-| Secret | Généré par | Stocké dans | Lu par Ansible via |
-|---|---|---|---|
-| Mot de passe RDS | Terraform (`random_password`) | Secrets Manager | lookup `amazon.aws.secretsmanager_secret` |
-| Identifiants admin PrestaShop | l'équipe | Ansible Vault ([ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml)) | `--ask-vault-pass` |
-| Clé SSH | `ssh-keygen` | `.keys/` (gitignoré) | chemin transmis par l'inventaire, jamais le contenu |
+| Secret                        | Généré par                    | Stocké dans                                                                          | Lu par Ansible via                                   |
+| ----------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| Mot de passe RDS              | Terraform (`random_password`) | Secrets Manager                                                                      | lookup `amazon.aws.secretsmanager_secret`            |
+| Identifiants admin PrestaShop | l'équipe                      | Ansible Vault ([ansible/group_vars/all/vault.yml](ansible/group_vars/all/vault.yml)) | `--ask-vault-pass` (mot de passe dans `.vault-pass`) |
+| Clé SSH                       | `ssh-keygen`                  | `.keys/` (gitignoré)                                                                 | chemin transmis par l'inventaire, jamais le contenu  |
 
 ## 8. Exploitation et maintenance
 
 - **Mettre à jour l'application** : modifier `prestashop_image` ou les templates du rôle `prestashop`, puis relancer `ansible-playbook`. Le handler ne redéploie le conteneur que si sa configuration a changé.
 - **Changer la capacité** : modifier `min_size`, `max_size` ou `desired_capacity` dans `envs/<env>.tfvars`, lancer `terraform apply`, puis `ansible-playbook` pour configurer les nouvelles instances.
-- **Remplacer une instance** (y compris après un changement d'AMI ou de type) : lancer un *instance refresh* sur l'ASG, puis `terraform apply` et `ansible-playbook`.
+- **Remplacer une instance** (y compris après un changement d'AMI ou de type) : lancer un _instance refresh_ sur l'ASG, puis `terraform apply` et `ansible-playbook`.
 - **Faire tourner le mot de passe RDS** : `terraform -chdir=terraform apply -replace=module.database.random_password.master`, puis `ansible-playbook`, qui relit le secret et redéploie.
 - **Consulter les logs** : `docker logs prestashop-prestashop-1` sur l'instance. Ils ne sont pas encore centralisés.
 

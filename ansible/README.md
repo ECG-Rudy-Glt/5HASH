@@ -43,6 +43,7 @@ L'inventaire est mis à jour à chaque `terraform apply`.
 | Identifiants RDS | AWS Secrets Manager (créé par Terraform) | Lookup `amazon.aws.secretsmanager_secret` à partir du seul ARN transmis par l'inventaire |
 | Identifiants admin PrestaShop | [group_vars/all/vault.yml](group_vars/all/vault.yml), chiffré | Ansible Vault (`--ask-vault-pass`) |
 
+- **Mot de passe Vault versionné exprès** : il est dans `.vault-pass`, à la racine, pour que l'évaluatrice puisse lancer le playbook (voir [README racine §4](../README.md#4-mise-en-place-à-faire-une-fois-avant-la-séquence-de-test)). Hors contexte d'évaluation, ce fichier serait gitignoré.
 - **Pas de copie** : le mot de passe RDS n'est jamais recopié dans Vault.
 - **Lookup local** : il s'exécute sur le contrôleur. `boto3` et `botocore` doivent donc être installés dans l'environnement Python d'Ansible (`pipx inject ansible-core boto3 botocore`), pas sur les instances.
 - **`no_log: true`** : il est posé sur les tâches qui manipulent un secret déchiffré, pour qu'il n'apparaisse ni dans les logs ni dans `--diff`.
