@@ -31,7 +31,22 @@ flowchart TB
     sm -.->|lookup Ansible depuis le contrôleur| asg
 ```
 
-## 2. Ce qu'elle fait
+## 2. Composants AWS en bref
+
+| Composant | Rôle |
+|---|---|
+| **VPC**, subnets publics et privés (2 AZ) | Réseau isolé du projet, réparti sur deux zones de disponibilité |
+| **Internet Gateway** | Accès Internet, en entrée et en sortie, des subnets publics |
+| **NAT Gateway** | Sortie Internet des instances privées (Docker, image), sans les rendre joignables |
+| **Security Groups** | Pare-feu en chaîne : ALB → app → base |
+| **ALB** (Application Load Balancer) | Point d'entrée HTTP unique : répartit la charge et écarte les instances en panne |
+| **Auto Scaling Group** + Launch Template | Ajoute ou retire des EC2 selon le CPU, remplace celles qui tombent |
+| **EC2** | Serveurs configurés par Ansible, qui font tourner le conteneur PrestaShop |
+| **RDS MySQL** | Base managée : sauvegardes, correctifs et failover (Multi-AZ en prod) |
+| **Secrets Manager** | Coffre du mot de passe RDS, généré par Terraform et lu par Ansible |
+| **S3** | State Terraform partagé, verrouillé par `use_lockfile` |
+
+## 3. Ce qu'elle fait
 
 1. **Réception** : le client appelle le nom DNS de l'ALB, seul composant exposé à Internet.
 2. **Répartition** : l'ALB transmet la requête à une instance saine du target group. Un cookie d'affinité (1 h) renvoie ensuite le même client vers la même instance.
@@ -43,7 +58,7 @@ flowchart TB
    3. ses clients sont redirigés vers une autre instance et perdent leur session (panier, connexion).
 6. **Panne de la base** (prod, Multi-AZ) : RDS bascule sur sa réplique dans l'autre AZ.
 
-## 3. Pourquoi ces choix
+## 4. Pourquoi ces choix
 
 | Composant       | Choix                                                           | Pourquoi                                                                                                                                                                  |
 | --------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -59,3 +74,13 @@ flowchart TB
 | Inventaire      | `ansible_host` / `ansible_group` dans le state Terraform        | Ansible lit ce que Terraform a créé : aucune IP ni aucun hôte recopiés à la main                                                                                          |
 | State           | S3 +`use_lockfile`                                              | State partagé par l'équipe, protégé des`apply` simultanés, sans table DynamoDB                                                                                            |
 | Environnement   | Floci                                                           | Émule AWS en local, sans compte ni coût. Le code reste portable vers AWS : seuls les endpoints du provider changent                                                       |
+
+## 5. Pourquoi un ALB plutôt que Traefik, Nginx ou HAProxy
+
+Ces reverse proxies feraient le même travail, mais moins bien ici :
+
+- **Hébergement** : il faudrait une EC2 de plus à configurer et à maintenir, qui deviendrait un point de panne unique. L'ALB est managé et redondant sur plusieurs AZ.
+- **Scaling** : l'ASG inscrit et retire lui-même ses instances dans le target group de l'ALB. Un proxy auto-hébergé aurait besoin d'un mécanisme de découverte des instances.
+- **Remplacement** : avec le health check de type `ELB`, une instance en panne est retirée du trafic *puis* remplacée. Un proxy ne ferait que la première partie.
+
+Traefik est surtout utile pour router entre plusieurs conteneurs d'un même hôte. Ici, chaque instance ne fait tourner qu'un conteneur, et la répartition se fait entre instances : c'est le rôle de l'ALB.

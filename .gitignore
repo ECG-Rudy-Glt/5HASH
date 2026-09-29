@@ -4,6 +4,5 @@ floci-data/
 **/*.tfstate.*
 *.retry
 .keys/
-.vault-pass
 ansible/collections/
 ansible/roles/geerlingguy.docker/
